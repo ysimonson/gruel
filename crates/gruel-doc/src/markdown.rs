@@ -2,15 +2,22 @@
 
 use std::fmt::Write;
 
+use crate::links::{rewrite, LinkTable};
 use crate::{DocFile, DocItem, ItemKind, NamedDoc};
 
 /// Render the per-file index page (`<file>/index.md`) listing every
 /// item with a one-line lead pulled from the first line of its docs.
 pub fn render_index(file: &DocFile) -> String {
+    render_index_with(file, &LinkTable::new())
+}
+
+/// Render the per-file index page, rewriting intra-doc links against
+/// the given `LinkTable` (Phase 5).
+pub fn render_index_with(file: &DocFile, table: &LinkTable) -> String {
     let mut out = String::new();
     write!(out, "# {}\n\n", file.stem).unwrap();
     if let Some(module_doc) = &file.module_doc {
-        out.push_str(&module_doc.body);
+        out.push_str(&rewrite(&module_doc.body, table, ".md"));
         out.push_str("\n\n");
     }
     if file.items.is_empty() {
@@ -18,9 +25,17 @@ pub fn render_index(file: &DocFile) -> String {
     }
     out.push_str("## Items\n\n");
     for item in &file.items {
-        write!(out, "- `{} {}`", item.kind.label(), item.name).unwrap();
+        write!(
+            out,
+            "- [`{} {}`]({}.md)",
+            item.kind.label(),
+            item.name,
+            item.slug
+        )
+        .unwrap();
         if let Some(summary) = first_line(&item.doc) {
-            write!(out, " — {}", summary).unwrap();
+            let rewritten = rewrite(summary, table, ".md");
+            write!(out, " — {}", rewritten).unwrap();
         }
         out.push('\n');
     }
@@ -29,31 +44,40 @@ pub fn render_index(file: &DocFile) -> String {
 
 /// Render a single item's Markdown page (`<slug>.md`).
 pub fn render_markdown(item: &DocItem) -> String {
+    render_markdown_with(item, &LinkTable::new())
+}
+
+/// Render a single item's Markdown page, rewriting intra-doc links
+/// against the given `LinkTable` (Phase 5).
+pub fn render_markdown_with(item: &DocItem, table: &LinkTable) -> String {
     let mut out = String::new();
     write!(out, "# `{} {}`\n\n", item.kind.label(), item.name).unwrap();
     if let Some(doc) = &item.doc {
-        out.push_str(&doc.body);
+        out.push_str(&rewrite(&doc.body, table, ".md"));
         out.push_str("\n\n");
     }
-    render_sections(&mut out, item);
+    render_sections(&mut out, item, table);
     out
 }
 
-fn render_sections(out: &mut String, item: &DocItem) {
-    render_named_section(out, "Fields", &item.detail.fields);
-    render_named_section(out, "Variants", &item.detail.variants);
-    render_named_section(out, "Methods", &item.detail.methods);
+fn render_sections(out: &mut String, item: &DocItem, table: &LinkTable) {
+    render_named_section(out, "Fields", &item.detail.fields, table);
+    render_named_section(out, "Variants", &item.detail.variants, table);
+    render_named_section(out, "Methods", &item.detail.methods, table);
     if !item.detail.extern_fns.is_empty() {
         match item.kind {
-            ItemKind::LinkExtern => {
-                render_named_section(out, "Extern functions", &item.detail.extern_fns)
-            }
-            _ => render_named_section(out, "Functions", &item.detail.extern_fns),
+            ItemKind::LinkExtern => render_named_section(
+                out,
+                "Extern functions",
+                &item.detail.extern_fns,
+                table,
+            ),
+            _ => render_named_section(out, "Functions", &item.detail.extern_fns, table),
         }
     }
 }
 
-fn render_named_section(out: &mut String, heading: &str, items: &[NamedDoc]) {
+fn render_named_section(out: &mut String, heading: &str, items: &[NamedDoc], table: &LinkTable) {
     if items.is_empty() {
         return;
     }
@@ -61,7 +85,8 @@ fn render_named_section(out: &mut String, heading: &str, items: &[NamedDoc]) {
     for it in items {
         write!(out, "- `{}`", it.name).unwrap();
         if let Some(summary) = first_line(&it.doc) {
-            write!(out, " — {}", summary).unwrap();
+            let rewritten = rewrite(summary, table, ".md");
+            write!(out, " — {}", rewritten).unwrap();
         }
         out.push('\n');
     }
@@ -125,8 +150,24 @@ mod tests {
         let md = render_index(&file);
         assert!(md.contains("# math"));
         assert!(md.contains("Module-level docs."));
-        assert!(md.contains("- `fn add` — Adds two ints."));
-        assert!(md.contains("- `fn sub`"));
+        // Items now appear as Markdown links to their own slug page.
+        assert!(md.contains("- [`fn add`](fn.add.md) — Adds two ints."));
+        assert!(md.contains("- [`fn sub`](fn.sub.md)"));
+    }
+
+    #[test]
+    fn intra_doc_link_rewritten_in_body() {
+        let mut table = LinkTable::new();
+        table.insert("Vec", "struct", "struct.Vec");
+        let item = DocItem {
+            slug: "fn.push".into(),
+            name: "push".into(),
+            kind: ItemKind::Function,
+            doc: Some(make_doc("Push to a [Vec].")),
+            detail: Default::default(),
+        };
+        let md = render_markdown_with(&item, &table);
+        assert!(md.contains("[Vec](struct.Vec.md)"));
     }
 
     #[test]

@@ -209,7 +209,7 @@ fn write_doc_site_markdown(
     site: &gruel_doc::DocSite,
     out_dir: &std::path::Path,
 ) -> std::io::Result<()> {
-    use gruel_doc::markdown::{render_index, render_markdown};
+    use gruel_doc::markdown::{render_index_with, render_markdown_with};
 
     // Top-level index.md links each file's index.
     let mut index = String::from("# Documentation\n\n");
@@ -219,11 +219,15 @@ fn write_doc_site_markdown(
     std::fs::write(out_dir.join("index.md"), index)?;
 
     for file in &site.files {
+        let table = file.link_table();
         let file_dir = out_dir.join(&file.stem);
         std::fs::create_dir_all(&file_dir)?;
-        std::fs::write(file_dir.join("index.md"), render_index(file))?;
+        std::fs::write(file_dir.join("index.md"), render_index_with(file, &table))?;
         for item in &file.items {
-            std::fs::write(file_dir.join(format!("{}.md", item.slug)), render_markdown(item))?;
+            std::fs::write(
+                file_dir.join(format!("{}.md", item.slug)),
+                render_markdown_with(item, &table),
+            )?;
         }
     }
     Ok(())
@@ -233,20 +237,25 @@ fn write_doc_site_html(
     site: &gruel_doc::DocSite,
     out_dir: &std::path::Path,
 ) -> std::io::Result<()> {
-    use gruel_doc::html::{render_html, render_index_html, render_site_index_html};
+    use gruel_doc::html::{render_html_with, render_index_html_with, render_site_index_html};
 
     std::fs::write(out_dir.join("index.html"), render_site_index_html(&site.files))?;
     for file in &site.files {
+        let table = file.link_table();
         let file_dir = out_dir.join(&file.stem);
         std::fs::create_dir_all(&file_dir)?;
-        std::fs::write(file_dir.join("index.html"), render_index_html(file))?;
+        std::fs::write(
+            file_dir.join("index.html"),
+            render_index_html_with(file, &table),
+        )?;
         let siblings: Vec<(String, String)> = file
             .items
             .iter()
             .map(|i| (i.slug.clone(), format!("{} {}", i.kind.label(), i.name)))
             .collect();
         for item in &file.items {
-            let page = render_html(item, &file.stem, &siblings, "index.html");
+            let page =
+                render_html_with(item, &file.stem, &siblings, "index.html", &table);
             std::fs::write(file_dir.join(format!("{}.html", item.slug)), page)?;
         }
     }

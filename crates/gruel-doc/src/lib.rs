@@ -13,6 +13,9 @@ pub use markdown::render_markdown;
 pub mod html;
 pub use html::render_html;
 
+pub mod links;
+pub use links::LinkTable;
+
 /// A single file's rendered documentation.
 #[derive(Debug, Clone)]
 pub struct DocFile {
@@ -117,6 +120,34 @@ impl DocSite {
     /// Add a `DocFile` produced by `from_ast` to this site.
     pub fn push(&mut self, file: DocFile) {
         self.files.push(file);
+    }
+
+    /// ADR-0089 Phase 5: build a `LinkTable` covering every top-level
+    /// item in the site, with each slug prefixed by the containing file's
+    /// stem. Right for the site-level index page where every link is one
+    /// directory away.
+    pub fn link_table(&self) -> LinkTable {
+        let mut table = LinkTable::new();
+        for file in &self.files {
+            for item in &file.items {
+                let slug_with_dir = format!("{}/{}", file.stem, item.slug);
+                table.insert(&item.name, item.kind.label(), &slug_with_dir);
+            }
+        }
+        table
+    }
+}
+
+impl DocFile {
+    /// ADR-0089 Phase 5: build a `LinkTable` for cross-references from
+    /// inside this file. Items in the same file are siblings, so their
+    /// slugs are unprefixed.
+    pub fn link_table(&self) -> LinkTable {
+        let mut table = LinkTable::new();
+        for item in &self.items {
+            table.insert(&item.name, item.kind.label(), &item.slug);
+        }
+        table
     }
 }
 

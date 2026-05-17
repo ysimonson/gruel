@@ -9,6 +9,7 @@
 
 use pulldown_cmark::{html, Options, Parser};
 
+use crate::links::LinkTable;
 use crate::{DocFile, DocItem};
 
 const STYLE: &str = include_str!("style.css");
@@ -24,7 +25,20 @@ pub fn render_html(
     siblings: &[(String, String)],
     index_link: &str,
 ) -> String {
-    let markdown = crate::render_markdown(item);
+    render_html_with(item, file_stem, siblings, index_link, &LinkTable::new())
+}
+
+/// ADR-0089 Phase 5: render a single item page, rewriting intra-doc
+/// links against `table`. When called from the site driver, `table` is
+/// usually `DocSite::link_table()`.
+pub fn render_html_with(
+    item: &DocItem,
+    file_stem: &str,
+    siblings: &[(String, String)],
+    index_link: &str,
+    table: &LinkTable,
+) -> String {
+    let markdown = crate::markdown::render_markdown_with(item, table);
     let body_html = markdown_to_html(&markdown);
     wrap(
         &format!("{} — {}", item.kind.label(), item.name),
@@ -37,7 +51,12 @@ pub fn render_html(
 
 /// Render the per-file index page (`<file>/index.html`).
 pub fn render_index_html(file: &DocFile) -> String {
-    let markdown = crate::markdown::render_index(file);
+    render_index_html_with(file, &LinkTable::new())
+}
+
+/// Render the per-file index page with intra-doc link rewriting.
+pub fn render_index_html_with(file: &DocFile, table: &LinkTable) -> String {
+    let markdown = crate::markdown::render_index_with(file, table);
     let body_html = markdown_to_html(&markdown);
     let siblings: Vec<(String, String)> = file
         .items

@@ -418,7 +418,7 @@ carries `Option<Doc>` unconditionally.
       sidebar and embedded CSS. UI tests covering: empty docs, code
       blocks, table, internal link, `<` escaping.
 
-- [ ] **Phase 5: Anchors, links, and cross-references.** Generate
+- [x] **Phase 5: Anchors, links, and cross-references.** Generate
       stable `id` attributes for every item, and rewrite intra-doc
       links of the form `[Name]` / `[Name::method]` / `[fn name]` to
       anchor URLs. No new dependency. Behaviour modelled on rustdoc's
