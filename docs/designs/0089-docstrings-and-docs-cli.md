@@ -426,7 +426,7 @@ carries `Option<Doc>` unconditionally.
       current file or via `@import` chain — anything else stays plain
       text).
 
-- [ ] **Phase 6: Stdlib + prelude land under `learn/references/` on
+- [x] **Phase 6: Stdlib + prelude land under `learn/references/` on
       the website.** Run `gruel --doc=markdown` over `std/` and
       `prelude/`, write the output to `docs/generated/stdlib/` and
       `docs/generated/prelude/`, and have `website/build.sh` copy

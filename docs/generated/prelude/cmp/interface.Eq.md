@@ -1,0 +1,6 @@
+# `interface Eq`
+
+## Methods
+
+- `eq`
+

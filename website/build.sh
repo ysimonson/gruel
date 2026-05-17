@@ -69,6 +69,61 @@ EOF
         | sed -e 's|(\.\./designs/\([0-9][0-9][0-9][0-9]\)-\([^)]*\)\.md)|(@/learn/references/adrs/\1-\2.md)|g'
 } > "$BUILTINS_DST"
 
+# ADR-0089 Phase 6: copy generated stdlib + prelude docs (one per-item
+# Markdown file plus per-module index.md) into the references section.
+# `make check-stdlib-docs` keeps them in sync with the .gruel sources.
+copy_doc_tree() {
+    local src_dir="$1"     # docs/generated/<name>
+    local dst_dir="$2"     # website/content/learn/references/<name>
+    local title="$3"
+    local weight="$4"
+
+    rm -rf "$dst_dir"
+    mkdir -p "$dst_dir"
+
+    # Top-level _index.md so Zola can render the section.
+    {
+        printf '+++\ntitle = "%s"\nweight = %s\ntemplate = "learn/section.html"\npage_template = "learn/page.html"\n+++\n\n' \
+            "$title" "$weight"
+        if [[ -f "$src_dir/index.md" ]]; then
+            cat "$src_dir/index.md"
+        fi
+    } > "$dst_dir/_index.md"
+
+    # Per-module subdirectories.
+    for module_dir in "$src_dir"/*/; do
+        [[ -d "$module_dir" ]] || continue
+        local module_name
+        module_name=$(basename "$module_dir")
+        local module_dst="$dst_dir/$module_name"
+        mkdir -p "$module_dst"
+
+        if [[ -f "$module_dir/index.md" ]]; then
+            {
+                printf '+++\ntitle = "%s"\ntemplate = "learn/section.html"\npage_template = "learn/page.html"\n+++\n\n' \
+                    "$module_name"
+                cat "$module_dir/index.md"
+            } > "$module_dst/_index.md"
+        fi
+
+        for item_file in "$module_dir"/*.md; do
+            [[ -f "$item_file" ]] || continue
+            local item_base
+            item_base=$(basename "$item_file" .md)
+            [[ "$item_base" == "index" ]] && continue
+            {
+                printf '+++\ntitle = "%s"\ntemplate = "learn/page.html"\n+++\n\n' \
+                    "$item_base"
+                cat "$item_file"
+            } > "$module_dst/$item_base.md"
+        done
+    done
+}
+
+echo "Copying stdlib + prelude docs..."
+copy_doc_tree docs/generated/stdlib   website/content/learn/references/stdlib  "Standard Library" 3
+copy_doc_tree docs/generated/prelude  website/content/learn/references/prelude "Prelude"          4
+
 # Copy ADRs. Each ADR becomes a page under references/adrs/. The section
 # index is authored in-tree (see content/learn/references/adrs/_index.md);
 # we just copy the individual ADR files.

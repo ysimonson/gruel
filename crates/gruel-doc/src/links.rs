@@ -65,6 +65,11 @@ pub fn rewrite(body: &str, table: &LinkTable, extension: &str) -> String {
     let bytes = body.as_bytes();
     let mut out = String::with_capacity(body.len());
     let mut i = 0;
+    // Indices we walk are byte offsets into the original UTF-8 string.
+    // ASCII characters `[` and `]` are single-byte, so this is safe for
+    // bracket matching; for everything else we slice the original `body`
+    // to copy through whole multi-byte chars intact (rather than byte
+    // by byte, which would corrupt non-ASCII as Latin-1).
     while i < bytes.len() {
         if bytes[i] == b'[' {
             if let Some(end_rel) = find_balanced_bracket(&bytes[i + 1..]) {
@@ -94,8 +99,11 @@ pub fn rewrite(body: &str, table: &LinkTable, extension: &str) -> String {
             i += 1;
             continue;
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // Non-`[` byte: copy through one UTF-8 codepoint at the current
+        // byte offset and advance by its length.
+        let ch = body[i..].chars().next().expect("valid utf-8");
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }

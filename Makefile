@@ -2,6 +2,7 @@
         check-intrinsic-docs gen-intrinsic-docs \
         check-builtins-docs gen-builtins-docs \
         check-spec-builtins \
+        gen-stdlib-docs check-stdlib-docs \
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
@@ -60,7 +61,7 @@ fmt:
 	cargo fmt --all
 
 # Check formatting without making changes (for CI).
-check: check-intrinsic-docs check-builtins-docs check-spec-builtins
+check: check-intrinsic-docs check-builtins-docs check-spec-builtins check-stdlib-docs
 	cargo check --workspace --all-targets --exclude gruel-runtime
 	cargo check --manifest-path fuzz/Cargo.toml --all-targets
 	cargo clippy --workspace --all-targets --exclude gruel-runtime
@@ -114,6 +115,24 @@ check-builtins-docs:
 			target/builtins-reference.md.generated || true; \
 		exit 1; \
 	fi
+
+# ADR-0089 Phase 6: regenerate docs/generated/stdlib/ and prelude/
+# trees from std/*.gruel / prelude/*.gruel. Mirrors the
+# gen-intrinsic-docs / check-intrinsic-docs pattern.
+gen-stdlib-docs:
+	./scripts/gen-stdlib-docs.sh
+
+check-stdlib-docs:
+	@mkdir -p target
+	@./scripts/gen-stdlib-docs.sh target/stdlib-docs-check > /dev/null
+	@for sub in stdlib prelude; do \
+		if ! diff -r docs/generated/$$sub target/stdlib-docs-check/$$sub >/dev/null; then \
+			echo "docs/generated/$$sub is out of date."; \
+			echo "Run 'make gen-stdlib-docs' and commit the result."; \
+			diff -r docs/generated/$$sub target/stdlib-docs-check/$$sub || true; \
+			exit 1; \
+		fi; \
+	done
 
 # Run benchmarks. Pass ARGS="--iterations 10" etc. to forward options.
 bench:

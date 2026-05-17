@@ -1,0 +1,6 @@
+# `interface Ord`
+
+## Methods
+
+- `cmp`
+

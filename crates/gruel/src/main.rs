@@ -529,6 +529,13 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             return Err("Error: No source file specified".to_string());
         }
         (cli.sources, out)
+    } else if cli.doc.is_some() {
+        // ADR-0089: `--doc` is an early-return mode and doesn't link an
+        // output binary; the trailing source isn't an output path.
+        if cli.sources.is_empty() {
+            return Err("Error: No source file specified".to_string());
+        }
+        (cli.sources, String::new())
     } else {
         match cli.sources.len() {
             0 => return Err("Error: No source file specified".to_string()),
