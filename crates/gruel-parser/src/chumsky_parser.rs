@@ -7,7 +7,7 @@ use crate::ast::{
     AnonFnExpr, AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget,
     AssocFnCallExpr, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr,
     CharLit, CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr,
-    DeriveDecl, Directive, DirectiveArg, Directives, EnumDecl, EnumStructLitExpr, EnumVariant,
+    DeriveDecl, Directive, DirectiveArg, Directives, Doc, EnumDecl, EnumStructLitExpr, EnumVariant,
     Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident,
     IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement,
     LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit, Param, ParamMode,
@@ -15,6 +15,8 @@ use crate::ast::{
     SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
     TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
+use gruel_util::span::LineIndex;
+use std::collections::HashMap;
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
@@ -400,6 +402,7 @@ where
                 .then_ignore(just(TokenKind::Colon))
                 .then(ty.clone())
                 .map_with(|(name, field_ty), e| AnonStructField {
+                    doc: None,
                     name,
                     ty: field_ty,
                     span: span_from_extra(e),
@@ -548,6 +551,7 @@ where
         .then_ignore(just(TokenKind::Colon))
         .then(type_parser())
         .map_with(|((visibility, name), ty), e| FieldDecl {
+            doc: None,
             visibility,
             name,
             ty,
@@ -2221,6 +2225,7 @@ where
         .then_ignore(just(TokenKind::Colon))
         .then(type_parser())
         .map_with(|(name, field_ty), e| AnonStructField {
+            doc: None,
             name,
             ty: field_ty,
             span: span_from_extra(e),
@@ -2951,6 +2956,7 @@ where
                     syms.unchecked_name,
                 );
                 Function {
+                    doc: None,
                     directives,
                     visibility,
                     is_unchecked,
@@ -3002,6 +3008,7 @@ where
         .then(struct_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
         .map_with(
             |((directives, visibility, name), (fields, methods)), e| StructDecl {
+                doc: None,
                 directives,
                 visibility,
                 posture: Posture::Affine,
@@ -3041,6 +3048,7 @@ where
         .then_ignore(just(TokenKind::Colon))
         .then(type_parser())
         .map_with(|((visibility, name), ty), e| EnumVariantField {
+            doc: None,
             visibility,
             name,
             ty,
@@ -3063,6 +3071,7 @@ where
     ident_parser()
         .then(variant_kind)
         .map_with(|(name, kind), e| EnumVariant {
+            doc: None,
             name,
             kind,
             span: span_from_extra(e),
@@ -3113,6 +3122,7 @@ where
         .then(enum_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
         .map_with(
             |(((directives, visibility), name), (variants, methods)), e| EnumDecl {
+                doc: None,
                 directives,
                 visibility,
                 posture: Posture::Affine,
@@ -3214,6 +3224,7 @@ where
                     syms.unchecked_name,
                 );
                 Method {
+                    doc: None,
                     directives,
                     visibility,
                     is_unchecked,
@@ -3269,6 +3280,7 @@ where
         .then(const_tail)
         .map_with(
             |((directives, visibility, name), (ty, init)), e| ConstDecl {
+                doc: None,
                 directives,
                 visibility,
                 name,
@@ -3385,6 +3397,7 @@ where
                     syms.unchecked_name,
                 );
                 MethodSig {
+                    doc: None,
                     directives,
                     is_unchecked,
                     name,
@@ -3430,6 +3443,7 @@ where
         .then(body)
         .map_with(
             |(((directives, visibility), name), methods), e| InterfaceDecl {
+                doc: None,
                 directives,
                 visibility,
                 name,
@@ -3462,6 +3476,7 @@ where
         .ignore_then(ident_parser())
         .then(body)
         .map_with(|(name, methods), e| DeriveDecl {
+            doc: None,
             name,
             methods,
             span: span_from_extra(e),
@@ -3488,6 +3503,7 @@ where
         .then_ignore(just(TokenKind::Semi))
         .map_with(
             |(((directives, name), params), return_type), e| crate::ast::ExternFn {
+                doc: None,
                 directives,
                 name,
                 params,
@@ -3528,6 +3544,7 @@ where
         )
         .map_with(
             |((link_mode, library), items), e| crate::ast::LinkExternBlock {
+                doc: None,
                 library,
                 items,
                 link_mode,
@@ -3626,7 +3643,10 @@ where
         .repeated()
         .collect::<Vec<_>>()
         .then_ignore(end())
-        .map(|items| Ast { items })
+        .map(|items| Ast {
+            module_doc: None,
+            items,
+        })
         .boxed()
 }
 
@@ -3695,6 +3715,9 @@ fn convert_error(err: Rich<'_, TokenKind>) -> CompileError {
 /// Chumsky-based parser that converts tokens into an AST.
 pub struct ChumskyParser {
     tokens: Vec<(TokenKind, SimpleSpan)>,
+    /// ADR-0089: the original token stream (including `LineDoc`s) used to
+    /// derive doc blocks when the `docs` preview feature is enabled.
+    raw_tokens: Vec<gruel_lexer::Token>,
     source_len: usize,
     interner: ThreadedRodeo,
     /// File ID for spans in this file.
@@ -3705,6 +3728,9 @@ pub struct ChumskyParser {
     /// post-parse validation pass emits errors if preview-only syntax is used
     /// without the corresponding flag.
     preview_features: PreviewFeatures,
+    /// ADR-0089: source text of the file being parsed. Required to compute
+    /// line numbers for doc-block grouping when `docs` preview is enabled.
+    source: Option<String>,
 }
 
 impl ChumskyParser {
@@ -3717,9 +3743,13 @@ impl ChumskyParser {
             .map(|t| t.span.file_id)
             .unwrap_or(FileId::DEFAULT);
 
+        let raw_tokens = tokens.clone();
         let spanned_tokens: Vec<(TokenKind, SimpleSpan)> = tokens
             .into_iter()
             .filter(|t| t.kind != TokenKind::Eof) // Remove EOF, chumsky handles end differently
+            // ADR-0089: drop `LineDoc` tokens before chumsky sees them.
+            // The Phase 2 post-pass uses `raw_tokens` to recover them.
+            .filter(|t| !matches!(t.kind, TokenKind::LineDoc(_)))
             .map(|t| {
                 (
                     t.kind,
@@ -3729,10 +3759,12 @@ impl ChumskyParser {
             .collect();
         Self {
             tokens: spanned_tokens,
+            raw_tokens,
             source_len,
             interner,
             file_id,
             preview_features: PreviewFeatures::default(),
+            source: None,
         }
     }
 
@@ -3740,6 +3772,14 @@ impl ChumskyParser {
     /// syntax gated behind a `--preview` flag (ADR-0005).
     pub fn with_preview_features(mut self, features: PreviewFeatures) -> Self {
         self.preview_features = features;
+        self
+    }
+
+    /// ADR-0089: attach the source text. Required to derive doc blocks
+    /// when the `docs` preview feature is enabled. Without it, `LineDoc`
+    /// tokens are silently dropped (same as the Phase 1 behavior).
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
         self
     }
 
@@ -3760,7 +3800,7 @@ impl ChumskyParser {
         let eoi: SimpleSpan = (self.source_len..self.source_len).into();
         let mapped = stream.map(eoi, |(tok, span)| (tok, span));
 
-        let ast = ast_parser()
+        let mut ast = ast_parser()
             .parse_with_state(mapped, &mut state)
             .into_result()
             .map_err(|errs| {
@@ -3778,7 +3818,279 @@ impl ChumskyParser {
             return Err(CompileErrors::from(errors));
         }
 
+        // ADR-0089 (stable): always attach docs when source is provided.
+        // Call sites that pre-date this and don't pass `with_source()`
+        // simply have no docs on their AST (same as the Phase 1 drop).
+        if let Some(ref source) = self.source {
+            let mut doc_errors = Vec::new();
+            attach_docs(
+                &mut ast,
+                &self.raw_tokens,
+                source,
+                self.file_id,
+                &self.interner,
+                &mut doc_errors,
+            );
+            if !doc_errors.is_empty() {
+                return Err(CompileErrors::from(doc_errors));
+            }
+        }
+
         Ok((ast, self.interner))
+    }
+}
+
+/// ADR-0089: a contiguous run of `///` lines forming a single doc block.
+#[derive(Debug, Clone)]
+struct DocBlock {
+    /// Joined body text (`\n`-separated, with `///` and one leading space
+    /// stripped per line).
+    body: String,
+    /// Source span covering the block.
+    span: Span,
+    /// 1-based start line.
+    start_line: usize,
+    /// 1-based end line (inclusive).
+    end_line: usize,
+}
+
+/// ADR-0089: group consecutive `LineDoc` tokens into doc blocks.
+///
+/// A doc block is a run of `///` lines on adjacent source lines (no blank
+/// line, no non-doc token between). Two LineDoc tokens belong to the same
+/// block iff their line numbers differ by exactly one.
+fn collect_doc_blocks(
+    raw_tokens: &[gruel_lexer::Token],
+    line_index: &LineIndex,
+    interner: &ThreadedRodeo,
+) -> Vec<DocBlock> {
+    let mut blocks: Vec<DocBlock> = Vec::new();
+    let mut current_lines: Vec<&str> = Vec::new();
+    let mut current_span: Option<Span> = None;
+    let mut current_start_line: usize = 0;
+    let mut current_end_line: usize = 0;
+    let mut last_was_doc = false;
+
+    for tok in raw_tokens {
+        match tok.kind {
+            TokenKind::LineDoc(spur) => {
+                let line = line_index.span_line_number(tok.span);
+                let body = interner.resolve(&spur);
+                if last_was_doc && line == current_end_line + 1 {
+                    current_lines.push(body);
+                    current_end_line = line;
+                    current_span = current_span.map(|s| Span::cover(s, tok.span));
+                } else {
+                    if let (Some(span), false) = (current_span, current_lines.is_empty()) {
+                        blocks.push(DocBlock {
+                            body: current_lines.join("\n"),
+                            span,
+                            start_line: current_start_line,
+                            end_line: current_end_line,
+                        });
+                    }
+                    current_lines = vec![body];
+                    current_span = Some(tok.span);
+                    current_start_line = line;
+                    current_end_line = line;
+                }
+                last_was_doc = true;
+            }
+            TokenKind::Eof => {}
+            _ => {
+                if let (Some(span), false) = (current_span, current_lines.is_empty()) {
+                    blocks.push(DocBlock {
+                        body: current_lines.join("\n"),
+                        span,
+                        start_line: current_start_line,
+                        end_line: current_end_line,
+                    });
+                    current_lines = Vec::new();
+                    current_span = None;
+                }
+                last_was_doc = false;
+            }
+        }
+    }
+    if let (Some(span), false) = (current_span, current_lines.is_empty()) {
+        blocks.push(DocBlock {
+            body: current_lines.join("\n"),
+            span,
+            start_line: current_start_line,
+            end_line: current_end_line,
+        });
+    }
+    blocks
+}
+
+/// ADR-0089: apply the attachment rule and populate `Ast.module_doc` plus
+/// each item's `doc` field. Emits parse errors for any doc block that
+/// neither qualifies as the module candidate nor is glued to an item.
+fn attach_docs(
+    ast: &mut Ast,
+    raw_tokens: &[gruel_lexer::Token],
+    source: &str,
+    file_id: FileId,
+    interner: &ThreadedRodeo,
+    errors: &mut Vec<CompileError>,
+) {
+    let line_index = LineIndex::new(source);
+    let blocks = collect_doc_blocks(raw_tokens, &line_index, interner);
+    if blocks.is_empty() {
+        return;
+    }
+
+    // Compute, for each non-LineDoc token: its start line. The "first
+    // non-doc token line" tells us whether a doc block has an item above
+    // it (file-level rule).
+    let first_non_doc_line: Option<usize> = raw_tokens
+        .iter()
+        .find(|t| !matches!(t.kind, TokenKind::LineDoc(_) | TokenKind::Eof))
+        .map(|t| line_index.span_line_number(t.span));
+
+    // Build a lookup: byte offset → 1-based line for every non-doc, non-EOF
+    // token. Used to recognise when a doc block is glued to a follower.
+    let mut token_line_by_start: HashMap<u32, usize> = HashMap::new();
+    for tok in raw_tokens {
+        if matches!(tok.kind, TokenKind::LineDoc(_) | TokenKind::Eof) {
+            continue;
+        }
+        token_line_by_start.insert(tok.span.start, line_index.span_line_number(tok.span));
+    }
+
+    // Walk blocks in order. For each block, decide attachment.
+    // - Module candidate: first block in file AND no non-doc token appears
+    //   on a line strictly before the block's start_line.
+    // - Glued: there exists a non-doc token whose start line == end_line + 1.
+    let mut module_doc_assigned = false;
+    // For glued blocks: map item start byte offset → Doc.
+    let mut item_docs: HashMap<u32, Doc> = HashMap::new();
+
+    for (idx, block) in blocks.iter().enumerate() {
+        let is_first_block = idx == 0;
+        let no_item_above = match first_non_doc_line {
+            None => true,
+            Some(line) => line >= block.start_line,
+        };
+        let qualifies_as_module = is_first_block && no_item_above;
+
+        // Find the next non-doc token after this block (the immediately
+        // following item-candidate).
+        let next_non_doc = raw_tokens
+            .iter()
+            .find(|t| {
+                !matches!(t.kind, TokenKind::LineDoc(_) | TokenKind::Eof)
+                    && t.span.start > block.span.end
+            });
+        let glued = next_non_doc
+            .map(|t| line_index.span_line_number(t.span) == block.end_line + 1)
+            .unwrap_or(false);
+
+        let doc = Doc {
+            body: block.body.clone(),
+            span: with_file(block.span, file_id),
+        };
+
+        if qualifies_as_module && !glued {
+            // Module candidate with a blank-line separator → module doc.
+            if !module_doc_assigned {
+                ast.module_doc = Some(doc);
+                module_doc_assigned = true;
+            }
+            continue;
+        }
+
+        if glued {
+            // Attach to the immediately following item by its start position.
+            // The post-walk over the AST will pick it up.
+            let target = next_non_doc.expect("glued implies next token exists");
+            item_docs.insert(target.span.start, doc);
+            continue;
+        }
+
+        // Not glued, not module candidate → parse error.
+        let span_in_file = with_file(block.span, file_id);
+        errors.push(CompileError::new(
+            ErrorKind::ParseError(
+                "doc comment must be immediately followed by an item".to_string(),
+            ),
+            span_in_file,
+        ));
+    }
+
+    // Distribute item_docs onto matching AST items.
+    if !item_docs.is_empty() {
+        distribute_docs_to_items(ast, &mut item_docs);
+    }
+}
+
+/// Helper: set a `Span`'s file id when constructing a new span from one
+/// that already carries the right id (no-op in practice).
+fn with_file(span: Span, file_id: FileId) -> Span {
+    Span::with_file(file_id, span.start, span.end)
+}
+
+/// ADR-0089: walk the AST and attach docs to items based on byte-offset
+/// matching against `item_docs`. Visits every doc-bearing position:
+/// top-level items plus nested method, field, and variant declarations.
+fn distribute_docs_to_items(ast: &mut Ast, item_docs: &mut HashMap<u32, Doc>) {
+    for item in &mut ast.items {
+        match item {
+            Item::Function(f) => {
+                attach_if_match(&mut f.doc, item_docs, f.span.start);
+            }
+            Item::Struct(s) => {
+                attach_if_match(&mut s.doc, item_docs, s.span.start);
+                for field in &mut s.fields {
+                    attach_if_match(&mut field.doc, item_docs, field.span.start);
+                }
+                for method in &mut s.methods {
+                    attach_if_match(&mut method.doc, item_docs, method.span.start);
+                }
+            }
+            Item::Enum(e) => {
+                attach_if_match(&mut e.doc, item_docs, e.span.start);
+                for variant in &mut e.variants {
+                    attach_if_match(&mut variant.doc, item_docs, variant.span.start);
+                    if let crate::ast::EnumVariantKind::Struct(fields) = &mut variant.kind {
+                        for field in fields {
+                            attach_if_match(&mut field.doc, item_docs, field.span.start);
+                        }
+                    }
+                }
+                for method in &mut e.methods {
+                    attach_if_match(&mut method.doc, item_docs, method.span.start);
+                }
+            }
+            Item::Interface(i) => {
+                attach_if_match(&mut i.doc, item_docs, i.span.start);
+                for sig in &mut i.methods {
+                    attach_if_match(&mut sig.doc, item_docs, sig.span.start);
+                }
+            }
+            Item::Derive(d) => {
+                attach_if_match(&mut d.doc, item_docs, d.span.start);
+                for method in &mut d.methods {
+                    attach_if_match(&mut method.doc, item_docs, method.span.start);
+                }
+            }
+            Item::Const(c) => {
+                attach_if_match(&mut c.doc, item_docs, c.span.start);
+            }
+            Item::LinkExtern(b) => {
+                attach_if_match(&mut b.doc, item_docs, b.span.start);
+                for fn_decl in &mut b.items {
+                    attach_if_match(&mut fn_decl.doc, item_docs, fn_decl.span.start);
+                }
+            }
+            Item::Error(_) => {}
+        }
+    }
+}
+
+fn attach_if_match(slot: &mut Option<Doc>, item_docs: &mut HashMap<u32, Doc>, key: u32) {
+    if let Some(doc) = item_docs.remove(&key) {
+        *slot = Some(doc);
     }
 }
 
@@ -5785,5 +6097,141 @@ mod tests {
         let result = parse("fn main() -> i32 { 0 }").unwrap();
         assert_eq!(result.ast.items.len(), 1);
         assert!(matches!(result.ast.items[0], Item::Function(_)));
+    }
+
+    // ============================================================
+    // ADR-0089: doc-comment attachment tests
+    // ============================================================
+
+    fn parse_with_docs(source: &str) -> MultiErrorResult<ParseResult> {
+        let lexer = Lexer::new(source);
+        let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+        let parser = ChumskyParser::new(tokens, interner).with_source(source);
+        let (ast, interner) = parser.parse()?;
+        Ok(ParseResult { ast, interner })
+    }
+
+    #[test]
+    fn test_docs_dropped_when_source_not_provided() {
+        // Without `.with_source()`, the parser has no LineIndex and
+        // therefore drops doc tokens at the boundary.
+        let source = "/// Module docs.\nfn main() -> i32 { 0 }";
+        let result = parse(source).unwrap();
+        assert!(result.ast.module_doc.is_none());
+        match &result.ast.items[0] {
+            Item::Function(f) => assert!(f.doc.is_none()),
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_docs_on_attaches_glued_doc_to_function() {
+        let source = "/// Docs for main.\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        assert!(result.ast.module_doc.is_none());
+        match &result.ast.items[0] {
+            Item::Function(f) => {
+                let doc = f.doc.as_ref().expect("expected doc on main");
+                assert_eq!(doc.body, "Docs for main.");
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_module_doc_separated_from_first_item() {
+        let source = "/// Module docs.\n\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        let module_doc = result
+            .ast
+            .module_doc
+            .as_ref()
+            .expect("expected a module doc");
+        assert_eq!(module_doc.body, "Module docs.");
+        match &result.ast.items[0] {
+            Item::Function(f) => assert!(f.doc.is_none()),
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_module_doc_then_item_doc() {
+        let source = "/// Module docs.\n\n/// Docs for main.\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        assert_eq!(
+            result.ast.module_doc.as_ref().unwrap().body,
+            "Module docs."
+        );
+        match &result.ast.items[0] {
+            Item::Function(f) => {
+                assert_eq!(f.doc.as_ref().unwrap().body, "Docs for main.");
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_doc_block_joins_consecutive_lines() {
+        let source = "/// Line 1\n/// Line 2\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => {
+                assert_eq!(f.doc.as_ref().unwrap().body, "Line 1\nLine 2");
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_doc_after_other_item_attaches_to_main() {
+        // First item has no docs above it; second item has a glued doc.
+        // First block can't be module candidate because helper is above main's docs.
+        let source =
+            "fn helper() {}\n\n/// Docs for main.\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        assert!(result.ast.module_doc.is_none());
+        match &result.ast.items[1] {
+            Item::Function(f) => {
+                assert_eq!(f.doc.as_ref().unwrap().body, "Docs for main.");
+            }
+            _ => panic!("expected Function at index 1"),
+        }
+    }
+
+    #[test]
+    fn test_unglued_doc_after_first_item_is_error() {
+        // Doc has an item above it (helper), and a blank line below before
+        // the next item — disqualified as module candidate AND not glued.
+        let source = "fn helper() {}\n\n/// Stray.\n\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source);
+        assert!(result.is_err(), "expected parse error for orphan doc");
+    }
+
+    #[test]
+    fn test_doc_strips_one_leading_space() {
+        // Lexer strips one space; the body should not have the leading space.
+        let source = "/// hello\nfn main() -> i32 { 0 }";
+        let result = parse_with_docs(source).unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => assert_eq!(f.doc.as_ref().unwrap().body, "hello"),
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_docs_on_struct_and_field() {
+        let source = "\
+/// Docs for Point.
+struct Point {
+    x: i32,
+    y: i32,
+}";
+        let result = parse_with_docs(source).unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                assert_eq!(s.doc.as_ref().unwrap().body, "Docs for Point.");
+            }
+            _ => panic!("expected Struct"),
+        }
     }
 }

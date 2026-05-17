@@ -200,7 +200,9 @@ fn parse_uncached(
     let lexer = Lexer::with_interner_and_file_id(source.source, file_interner, source.file_id);
     let (tokens, file_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
 
-    let parser = Parser::new(tokens, file_interner).with_preview_features(preview_features.clone());
+    let parser = Parser::new(tokens, file_interner)
+        .with_preview_features(preview_features.clone())
+        .with_source(source.source);
     let (ast, file_interner) = parser.parse()?;
 
     let snapshot = InternerSnapshot::capture(&file_interner);

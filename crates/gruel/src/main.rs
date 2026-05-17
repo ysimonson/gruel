@@ -129,6 +129,139 @@ fn run_cache_stats(dir: &std::path::Path) {
 }
 
 /// ADR-0074 Phase 6: wipe the cache directory.
+/// ADR-0089: parse each source file and write per-file docs.
+///
+/// `--doc` is independent of sema/codegen: we run lexer + parser only
+/// (with the `docs` preview already known to be enabled) and hand the
+/// resulting AST + interner to `gruel_doc::DocSite`.
+fn run_doc(format: DocFormat, options: &Options, sources: &[(String, String)]) {
+    use gruel_compiler::Parser;
+    use gruel_doc::DocSite;
+    use std::path::PathBuf;
+
+    let out_dir = PathBuf::from(&options.doc_output_dir);
+    if let Err(e) = std::fs::create_dir_all(&out_dir) {
+        eprintln!(
+            "error creating doc output dir {}: {}",
+            out_dir.display(),
+            e
+        );
+        std::process::exit(1);
+    }
+
+    let mut site = DocSite::default();
+
+    for (idx, (path, source)) in sources.iter().enumerate() {
+        let file_id = FileId::new((idx + 1) as u32);
+        let lexer = Lexer::with_interner_and_file_id(
+            source.as_str(),
+            lasso::ThreadedRodeo::new(),
+            file_id,
+        );
+        let (tokens, interner) = match lexer.tokenize() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("lex error in {}: {:?}", path, e);
+                std::process::exit(1);
+            }
+        };
+        let parser = Parser::new(tokens, interner)
+            .with_preview_features(options.preview_features.clone())
+            .with_source(source.as_str());
+        let (ast, interner) = match parser.parse() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("parse error in {}: {:?}", path, e);
+                std::process::exit(1);
+            }
+        };
+        let stem = PathBuf::from(path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.clone());
+        let file = DocSite::from_ast(stem, &ast, &interner);
+        site.push(file);
+    }
+
+    if let Err(e) = write_doc_site(&site, &out_dir, format) {
+        eprintln!("error writing docs: {}", e);
+        std::process::exit(1);
+    }
+    println!(
+        "wrote {} doc file(s) to {}",
+        site.files.len(),
+        out_dir.display()
+    );
+}
+
+fn write_doc_site(
+    site: &gruel_doc::DocSite,
+    out_dir: &std::path::Path,
+    format: DocFormat,
+) -> std::io::Result<()> {
+    match format {
+        DocFormat::Markdown => write_doc_site_markdown(site, out_dir),
+        DocFormat::Html => write_doc_site_html(site, out_dir),
+    }
+}
+
+fn write_doc_site_markdown(
+    site: &gruel_doc::DocSite,
+    out_dir: &std::path::Path,
+) -> std::io::Result<()> {
+    use gruel_doc::markdown::{render_index_with, render_markdown_with};
+
+    // Top-level index.md links each file's index.
+    let mut index = String::from("# Documentation\n\n");
+    for file in &site.files {
+        index.push_str(&format!("- [{stem}]({stem}/index.md)\n", stem = file.stem));
+    }
+    std::fs::write(out_dir.join("index.md"), index)?;
+
+    for file in &site.files {
+        let table = file.link_table();
+        let file_dir = out_dir.join(&file.stem);
+        std::fs::create_dir_all(&file_dir)?;
+        std::fs::write(file_dir.join("index.md"), render_index_with(file, &table))?;
+        for item in &file.items {
+            std::fs::write(
+                file_dir.join(format!("{}.md", item.slug)),
+                render_markdown_with(item, &table),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn write_doc_site_html(
+    site: &gruel_doc::DocSite,
+    out_dir: &std::path::Path,
+) -> std::io::Result<()> {
+    use gruel_doc::html::{render_html_with, render_index_html_with, render_site_index_html};
+
+    std::fs::write(out_dir.join("index.html"), render_site_index_html(&site.files))?;
+    for file in &site.files {
+        let table = file.link_table();
+        let file_dir = out_dir.join(&file.stem);
+        std::fs::create_dir_all(&file_dir)?;
+        std::fs::write(
+            file_dir.join("index.html"),
+            render_index_html_with(file, &table),
+        )?;
+        let siblings: Vec<(String, String)> = file
+            .items
+            .iter()
+            .map(|i| (i.slug.clone(), format!("{} {}", i.kind.label(), i.name)))
+            .collect();
+        for item in &file.items {
+            let page =
+                render_html_with(item, &file.stem, &siblings, "index.html", &table);
+            std::fs::write(file_dir.join(format!("{}.html", item.slug)), page)?;
+        }
+    }
+    Ok(())
+}
+
 fn run_cache_clean(dir: &std::path::Path) {
     if !dir.exists() {
         println!("cache directory {} already clean", dir.display());
@@ -268,6 +401,27 @@ struct Cli {
     /// `--cache-dir` nor `GRUEL_CACHE_DIR` is set.
     #[arg(long, conflicts_with = "cache_stats")]
     cache_clean: bool,
+
+    /// ADR-0089: emit documentation for the given sources and exit.
+    /// `markdown` produces one Markdown file per item; `html` produces a
+    /// minimal HTML site with a sidebar of siblings.
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        conflicts_with_all = ["emit", "cache_stats", "cache_clean"],
+    )]
+    doc: Option<DocFormat>,
+
+    /// ADR-0089: directory for `--doc` output. Defaults to `target/doc/`.
+    #[arg(long, value_name = "DIR", default_value = "target/doc")]
+    doc_output_dir: String,
+}
+
+/// ADR-0089: doc output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum DocFormat {
+    Markdown,
+    Html,
 }
 
 struct Options {
@@ -300,6 +454,11 @@ struct Options {
     /// most one may be set; clap enforces.
     cache_stats: bool,
     cache_clean: bool,
+    /// ADR-0089: `--doc` format, when set. The driver early-returns
+    /// before normal compilation.
+    doc: Option<DocFormat>,
+    /// ADR-0089: `--doc-output-dir`; defaulted by clap to `target/doc`.
+    doc_output_dir: String,
 }
 
 /// Result of parsing command-line arguments.
@@ -360,6 +519,8 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             no_cache: cli.no_cache,
             cache_stats: cli.cache_stats,
             cache_clean: cli.cache_clean,
+            doc: None,
+            doc_output_dir: cli.doc_output_dir.clone(),
         });
     }
 
@@ -368,6 +529,13 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             return Err("Error: No source file specified".to_string());
         }
         (cli.sources, out)
+    } else if cli.doc.is_some() {
+        // ADR-0089: `--doc` is an early-return mode and doesn't link an
+        // output binary; the trailing source isn't an output path.
+        if cli.sources.is_empty() {
+            return Err("Error: No source file specified".to_string());
+        }
+        (cli.sources, String::new())
     } else {
         match cli.sources.len() {
             0 => return Err("Error: No source file specified".to_string()),
@@ -413,6 +581,8 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
         no_cache: cli.no_cache,
         cache_stats: cli.cache_stats,
         cache_clean: cli.cache_clean,
+        doc: cli.doc,
+        doc_output_dir: cli.doc_output_dir,
     })
 }
 
@@ -636,6 +806,13 @@ fn main() {
             (path.clone(), content)
         })
         .collect();
+
+    // ADR-0089: `--doc` is an early-return mode that parses sources and
+    // writes documentation files; sema/codegen never run.
+    if let Some(format) = options.doc {
+        run_doc(format, &options, &sources);
+        return;
+    }
 
     // Build SourceFile structs for multi-file compilation
     let source_files: Vec<SourceFile<'_>> = sources

@@ -1,0 +1,64 @@
+# ADR-0089: docstring lexical/parser behaviour
+#
+# Doc comments are part of the stable language: `///` lines are
+# attached to the following item, `////` (four or more slashes) is a
+# regular comment, and stray doc blocks are a parse error.
+
+[section]
+id = "lexical.docstrings"
+spec_chapter = "2.2"
+name = "Doc Comments"
+
+# `///` before an item compiles + runs normally.
+[[case]]
+name = "doc_comment_above_item"
+spec = ["2.2:5", "2.2:6", "2.2:7"]
+source = """
+/// Docs for main.
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42
+
+# Module-level docs (separated from the first item by a blank line)
+# coexist with an item-level doc.
+[[case]]
+name = "module_doc_then_item_doc"
+spec = ["2.2:7"]
+source = """
+/// Module docs.
+
+/// Docs for main.
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42
+
+# `////` (four or more slashes) is a plain comment, matching Rust.
+[[case]]
+name = "four_slashes_is_plain_comment"
+spec = ["2.2:5"]
+source = """
+//// Not a doc — plain comment.
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42
+
+# A stray doc block (no item above, no item glued below) is a parse
+# error.
+[[case]]
+name = "stray_doc_block_is_error"
+spec = ["2.2:8"]
+source = """
+fn helper() -> i32 { 0 }
+
+/// Stray.
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "doc comment must be immediately followed"

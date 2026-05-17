@@ -35,9 +35,26 @@ use smallvec::SmallVec;
 /// Most items have 0-1 directives, so we inline capacity for 1.
 pub type Directives = SmallVec<[Directive; 1]>;
 
+/// A doc comment block attached to a nameable item (ADR-0089).
+///
+/// The body is the raw Markdown content with the `///` marker and at most
+/// one shared leading space stripped per line; consecutive `///` lines are
+/// joined with `\n`. The span covers the entire block in source.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Doc {
+    /// Raw Markdown body (lines joined with `\n`).
+    pub body: String,
+    /// Span covering the doc-comment block.
+    pub span: Span,
+}
+
 /// A complete source file (list of items).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ast {
+    /// ADR-0089: module-level docstring, if the first doc block in the file
+    /// was separated from the first item by a blank line.
+    #[serde(default)]
+    pub module_doc: Option<Doc>,
     pub items: Vec<Item>,
 }
 
@@ -107,6 +124,9 @@ pub enum LinkMode {
 /// the link line.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkExternBlock {
+    /// ADR-0089: docstring attached to the block.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Library name as written in source (the contents of the string
     /// literal between the parentheses).
     pub library: StringLit,
@@ -131,6 +151,9 @@ fn default_link_mode() -> LinkMode {
 /// still attach per-declaration.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExternFn {
+    /// ADR-0089: docstring attached to this declaration.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives attached to this declaration (e.g. `@link_name(...)`).
     pub directives: Directives,
     /// Function name as it appears in Gruel source.
@@ -154,6 +177,9 @@ pub struct ExternFn {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConstDecl {
+    /// ADR-0089: docstring attached to this const.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this const
     pub directives: Directives,
     /// Visibility of this constant
@@ -185,6 +211,9 @@ pub struct ConstDecl {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructDecl {
+    /// ADR-0089: docstring attached to this struct.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this struct (e.g., `@mark(copy)`, `@derive(...)`)
     pub directives: Directives,
     /// Visibility of this struct
@@ -205,6 +234,9 @@ pub struct StructDecl {
 /// A field declaration in a struct.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldDecl {
+    /// ADR-0089: docstring attached to this field.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
     pub visibility: Visibility,
     /// Field name
@@ -231,6 +263,9 @@ pub struct FieldDecl {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumDecl {
+    /// ADR-0089: docstring attached to this enum.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this enum (e.g., `@derive(...)`, `@lang("ordering")`).
     pub directives: Directives,
     /// Visibility of this enum
@@ -251,6 +286,9 @@ pub struct EnumDecl {
 /// A variant in an enum declaration.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumVariant {
+    /// ADR-0089: docstring attached to this variant.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Variant name
     pub name: Ident,
     /// The kind of variant (unit, tuple, or struct).
@@ -273,6 +311,9 @@ pub enum EnumVariantKind {
 /// A named field in a struct-style enum variant.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumVariantField {
+    /// ADR-0089: docstring attached to this field.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
     pub visibility: Visibility,
     /// Field name
@@ -296,6 +337,9 @@ pub struct EnumVariantField {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDecl {
+    /// ADR-0089: docstring attached to this interface.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this interface (e.g., `@lang("drop")`).
     pub directives: Directives,
     /// Visibility (currently always private; module-system support is future
@@ -316,6 +360,9 @@ pub struct InterfaceDecl {
 /// No body and no associated functions (no-`self`) are allowed in MVP.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MethodSig {
+    /// ADR-0089: docstring attached to this signature.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this signature (e.g. `@mark(unchecked)`).
     pub directives: Directives,
     /// ADR-0088: whether this signature is marked `@mark(unchecked)`.
@@ -353,6 +400,9 @@ pub struct MethodSig {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeriveDecl {
+    /// ADR-0089: docstring attached to this derive.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Derive name (e.g., `Drop`)
     pub name: Ident,
     /// Method declarations inside the derive body
@@ -364,6 +414,9 @@ pub struct DeriveDecl {
 /// A method definition in an impl block.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Method {
+    /// ADR-0089: docstring attached to this method.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this method
     pub directives: Directives,
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
@@ -426,6 +479,9 @@ pub enum Visibility {
 /// A function definition.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Function {
+    /// ADR-0089: docstring attached to this function.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Directives applied to this function
     pub directives: Directives,
     /// Visibility of this function
@@ -556,6 +612,9 @@ pub enum TypeExpr {
 /// A field in an anonymous struct type expression.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AnonStructField {
+    /// ADR-0089: docstring attached to this field.
+    #[serde(default)]
+    pub doc: Option<Doc>,
     /// Field name
     pub name: Ident,
     /// Field type

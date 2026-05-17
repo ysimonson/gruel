@@ -274,13 +274,41 @@ fn process_char_from_quote(lex: &mut logos::Lexer<'_, LogosTokenKind>) -> Result
     }
 }
 
+/// Callback for `///` line doc comments (ADR-0089).
+///
+/// On entry, the lexer has matched the three slashes only. We consume
+/// the rest of the line (up to but not including the terminating `\n`),
+/// strip a single leading space if present (matching Rust), intern the
+/// resulting body text, and return the interned `Spur`. The `////…`
+/// (four-or-more slash) case is handled by a separate skip pattern with
+/// higher priority — also matching Rust.
+fn process_line_doc(lex: &mut logos::Lexer<'_, LogosTokenKind>) -> Spur {
+    let remainder = lex.remainder();
+    let line_end = remainder.find('\n').unwrap_or(remainder.len());
+    let body = &remainder[..line_end];
+    let stripped = body.strip_prefix(' ').unwrap_or(body);
+    let spur = lex.extras.get_or_intern(stripped);
+    lex.bump(line_end);
+    spur
+}
+
 /// Token kinds in the Gruel language, using logos derive macro.
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
 #[logos(error = LexError)]
 #[logos(extras = ThreadedRodeo)]
 #[logos(skip r"[ \t\n\r\f]+")]
-#[logos(skip r"//[^\n]*")]
+// `////` (four or more slashes) is a plain comment, matching Rust.
+#[logos(skip r"////+[^\n]*")]
+// Regular line comments — `//` not followed by another slash, or a bare `//`.
+#[logos(skip r"//[^/\n][^\n]*")]
+#[logos(skip r"//")]
 pub enum LogosTokenKind {
+    /// ADR-0089: `///` line doc comment. The associated `Spur` is the
+    /// interned line body with the `///` marker and at most one leading
+    /// space removed.
+    #[token("///", process_line_doc)]
+    LineDoc(Spur),
+
     // Keywords - logos prefers longer/specific matches over shorter/generic ones
     #[token("fn")]
     Fn,
@@ -589,6 +617,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::At => TokenKind::At,
             // AtImport is handled specially in tokenize() to provide the interned "import" Spur
             LogosTokenKind::AtImport => unreachable!("AtImport should be handled specially"),
+            LogosTokenKind::LineDoc(s) => TokenKind::LineDoc(s),
         }
     }
 }
@@ -1186,6 +1215,114 @@ mod tests {
 
         assert_eq!(sym0, sym1);
         assert_eq!(sym1, sym2);
+    }
+
+    /// Helper to read a `LineDoc` body string.
+    fn get_line_doc<'a>(kind: &TokenKind, interner: &'a ThreadedRodeo) -> Option<&'a str> {
+        match kind {
+            TokenKind::LineDoc(sym) => Some(interner.resolve(sym)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn test_line_doc_basic() {
+        // `/// x` → LineDoc("x") (one leading space stripped)
+        let lexer = LogosLexer::new("/// hello\nfn main() {}");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some("hello"));
+        assert!(matches!(tokens[1].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_line_doc_no_space() {
+        // `///x` → LineDoc("x") (no leading space to strip)
+        let lexer = LogosLexer::new("///x\n");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some("x"));
+    }
+
+    #[test]
+    fn test_line_doc_empty() {
+        // `///` alone (no body) → LineDoc("")
+        let lexer = LogosLexer::new("///\n");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some(""));
+    }
+
+    #[test]
+    fn test_line_doc_strips_one_space_only() {
+        // `///  hello` → LineDoc(" hello") — only ONE leading space stripped
+        let lexer = LogosLexer::new("///  hello\n");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some(" hello"));
+    }
+
+    #[test]
+    fn test_four_slashes_is_plain_comment() {
+        // `////` (4+ slashes) is a plain comment, matching Rust — skipped.
+        let lexer = LogosLexer::new("//// not a doc\nfn main() {}");
+        let (tokens, _interner) = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_five_slashes_is_plain_comment() {
+        let lexer = LogosLexer::new("///// also plain\nfn main() {}");
+        let (tokens, _interner) = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_line_doc_bang_in_body() {
+        // `///!` is a doc comment with body "!" — not an inner-doc form
+        // (we have no `//!` token).
+        let lexer = LogosLexer::new("///!boom\n");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some("!boom"));
+    }
+
+    #[test]
+    fn test_regular_double_slash_skipped() {
+        // Plain `//` is still skipped, as before.
+        let lexer = LogosLexer::new("// just a comment\nfn main() {}");
+        let (tokens, _interner) = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_empty_double_slash_skipped() {
+        // Lone `//` followed by EOL is also a plain comment.
+        let lexer = LogosLexer::new("//\nfn main() {}");
+        let (tokens, _interner) = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_consecutive_line_docs() {
+        // Each `///` line emits its own LineDoc token; the parser groups runs.
+        let lexer = LogosLexer::new("/// line 1\n/// line 2\nfn main() {}");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some("line 1"));
+        assert_eq!(get_line_doc(&tokens[1].kind, &interner), Some("line 2"));
+        assert!(matches!(tokens[2].kind, TokenKind::Fn));
+    }
+
+    #[test]
+    fn test_line_doc_span_excludes_newline() {
+        let lexer = LogosLexer::new("/// hi\n");
+        let (tokens, _interner) = lexer.tokenize().unwrap();
+        // "/// hi" is 6 bytes
+        assert_eq!(tokens[0].span.start, 0);
+        assert_eq!(tokens[0].span.end, 6);
+    }
+
+    #[test]
+    fn test_line_doc_at_eof_no_newline() {
+        // A `///x` at end of input (no trailing newline) is still recognized.
+        let lexer = LogosLexer::new("/// tail");
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        assert_eq!(get_line_doc(&tokens[0].kind, &interner), Some("tail"));
     }
 
     #[test]

@@ -1,0 +1,14 @@
+[package]
+name = "gruel-doc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gruel-parser.workspace = true
+gruel-util.workspace = true
+lasso.workspace = true
+# Phase 4 enables `html` rendering via pulldown-cmark. The dep is
+# always linked so the `DocSite::render_html()` method exists in both
+# the markdown-only and html builds; the Markdown path doesn't depend
+# on any pulldown-cmark types.
+pulldown-cmark.workspace = true

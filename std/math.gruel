@@ -1,23 +1,29 @@
-// Standard library: math module
-//
-// Provides basic mathematical utilities.
+/// Mathematical helper functions over signed 32-bit integers.
+///
+/// This module is small on purpose — `i32` operators cover most of
+/// what user code needs day-to-day. The wrappers here exist so users
+/// can write `math.abs(x)` instead of inlining branches everywhere.
 
 /// Returns the absolute value of an integer.
+///
+/// Panics on overflow when `x == i32::MIN` (since `-i32::MIN` is not
+/// representable as `i32`).
 pub fn abs(x: i32) -> i32 {
     if x < 0 { -x } else { x }
 }
 
-/// Returns the minimum of two values.
+/// Returns the smaller of `a` and `b`. See also [max] and [clamp].
 pub fn min(a: i32, b: i32) -> i32 {
     if a < b { a } else { b }
 }
 
-/// Returns the maximum of two values.
+/// Returns the larger of `a` and `b`. See also [min] and [clamp].
 pub fn max(a: i32, b: i32) -> i32 {
     if a > b { a } else { b }
 }
 
-/// Clamps a value to be within the given range [lo, hi].
+/// Clamps `x` into the inclusive range `[lo, hi]`. Equivalent to
+/// `max(lo, min(hi, x))`.
 pub fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
     if x < lo {
         lo
