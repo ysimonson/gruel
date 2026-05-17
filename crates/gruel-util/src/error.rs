@@ -2172,7 +2172,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, docs");
     }
 
     // ========================================================================

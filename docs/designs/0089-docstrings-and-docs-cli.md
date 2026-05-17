@@ -389,7 +389,7 @@ carries `Option<Doc>` unconditionally.
       Add lexer unit tests for the boundary cases (`///`, `///x`,
       `/// x`, `////`, `///!`).
 
-- [ ] **Phase 2: AST changes behind `docs` preview gate.** Add the
+- [x] **Phase 2: AST changes behind `docs` preview gate.** Add the
       `Doc` type, thread `Option<Doc>` onto every named item struct,
       add `Ast::module_doc`. When `docs` preview is **off** the parser
       eats `LineDoc` tokens and discards them; when on, it accumulates

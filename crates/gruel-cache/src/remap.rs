@@ -84,6 +84,8 @@ impl_no_op!(
     gruel_util::FileId,
     gruel_util::BinOp,
     gruel_util::UnaryOp,
+    // ADR-0089: `Doc` only contains a String body and a Span — no Spurs.
+    gruel_parser::ast::Doc,
 );
 
 // =====================================================================
@@ -185,11 +187,13 @@ impl RemapSpurs for Item {
 impl RemapSpurs for gruel_parser::ast::LinkExternBlock {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let gruel_parser::ast::LinkExternBlock {
+            doc,
             library,
             items,
             link_mode,
             span,
         } = self;
+        doc.remap_spurs(table);
         library.remap_spurs(table);
         items.remap_spurs(table);
         link_mode.remap_spurs(table);
@@ -204,12 +208,14 @@ impl RemapSpurs for gruel_parser::ast::LinkMode {
 impl RemapSpurs for gruel_parser::ast::ExternFn {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let gruel_parser::ast::ExternFn {
+            doc,
             directives,
             name,
             params,
             return_type,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         name.remap_spurs(table);
         params.remap_spurs(table);
@@ -221,6 +227,7 @@ impl RemapSpurs for gruel_parser::ast::ExternFn {
 impl RemapSpurs for ConstDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let ConstDecl {
+            doc,
             directives,
             visibility,
             name,
@@ -228,6 +235,7 @@ impl RemapSpurs for ConstDecl {
             init,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         name.remap_spurs(table);
@@ -248,6 +256,7 @@ impl RemapSpurs for gruel_builtins::Posture {
 impl RemapSpurs for StructDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let StructDecl {
+            doc,
             directives,
             visibility,
             posture,
@@ -256,6 +265,7 @@ impl RemapSpurs for StructDecl {
             methods,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         posture.remap_spurs(table);
@@ -269,11 +279,13 @@ impl RemapSpurs for StructDecl {
 impl RemapSpurs for FieldDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let FieldDecl {
+            doc,
             visibility,
             name,
             ty,
             span,
         } = self;
+        doc.remap_spurs(table);
         visibility.remap_spurs(table);
         name.remap_spurs(table);
         ty.remap_spurs(table);
@@ -287,6 +299,7 @@ impl RemapSpurs for EnumDecl {
         // ADR-0088 follow-up: destructuring catches future-added fields
         // at compile time.
         let EnumDecl {
+            doc,
             directives,
             visibility,
             posture,
@@ -295,6 +308,7 @@ impl RemapSpurs for EnumDecl {
             methods,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         posture.remap_spurs(table);
@@ -307,7 +321,13 @@ impl RemapSpurs for EnumDecl {
 
 impl RemapSpurs for EnumVariant {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        let EnumVariant { name, kind, span } = self;
+        let EnumVariant {
+            doc,
+            name,
+            kind,
+            span,
+        } = self;
+        doc.remap_spurs(table);
         name.remap_spurs(table);
         kind.remap_spurs(table);
         span.remap_spurs(table);
@@ -327,11 +347,13 @@ impl RemapSpurs for EnumVariantKind {
 impl RemapSpurs for EnumVariantField {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let EnumVariantField {
+            doc,
             visibility,
             name,
             ty,
             span,
         } = self;
+        doc.remap_spurs(table);
         visibility.remap_spurs(table);
         name.remap_spurs(table);
         ty.remap_spurs(table);
@@ -347,12 +369,14 @@ impl RemapSpurs for InterfaceDecl {
         // head. Explicit destructuring forces every field to be
         // handled.
         let InterfaceDecl {
+            doc,
             directives,
             visibility,
             name,
             methods,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         name.remap_spurs(table);
@@ -364,6 +388,7 @@ impl RemapSpurs for InterfaceDecl {
 impl RemapSpurs for MethodSig {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let MethodSig {
+            doc,
             directives,
             is_unchecked,
             name,
@@ -372,6 +397,7 @@ impl RemapSpurs for MethodSig {
             return_type,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         is_unchecked.remap_spurs(table);
         name.remap_spurs(table);
@@ -385,10 +411,12 @@ impl RemapSpurs for MethodSig {
 impl RemapSpurs for DeriveDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let DeriveDecl {
+            doc,
             name,
             methods,
             span,
         } = self;
+        doc.remap_spurs(table);
         name.remap_spurs(table);
         methods.remap_spurs(table);
         span.remap_spurs(table);
@@ -398,6 +426,7 @@ impl RemapSpurs for DeriveDecl {
 impl RemapSpurs for Method {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let Method {
+            doc,
             directives,
             visibility,
             is_unchecked,
@@ -408,6 +437,7 @@ impl RemapSpurs for Method {
             body,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         is_unchecked.remap_spurs(table);
@@ -435,6 +465,7 @@ impl RemapSpurs for SelfReceiverKind {
 impl RemapSpurs for Function {
     fn remap_spurs(&mut self, table: &[Spur]) {
         let Function {
+            doc,
             directives,
             visibility,
             is_unchecked,
@@ -444,6 +475,7 @@ impl RemapSpurs for Function {
             body,
             span,
         } = self;
+        doc.remap_spurs(table);
         directives.remap_spurs(table);
         visibility.remap_spurs(table);
         is_unchecked.remap_spurs(table);
@@ -514,7 +546,13 @@ impl RemapSpurs for TypeExpr {
 
 impl RemapSpurs for AnonStructField {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        let AnonStructField { name, ty, span } = self;
+        let AnonStructField {
+            doc,
+            name,
+            ty,
+            span,
+        } = self;
+        doc.remap_spurs(table);
         name.remap_spurs(table);
         ty.remap_spurs(table);
         span.remap_spurs(table);
@@ -1190,7 +1228,10 @@ mod tests {
 
     #[test]
     fn empty_ast_remap_is_noop() {
-        let mut ast = Ast { items: Vec::new() };
+        let mut ast = Ast {
+            module_doc: None,
+            items: Vec::new(),
+        };
         ast.remap_spurs(&[]);
         assert!(ast.items.is_empty());
     }
@@ -1248,7 +1289,9 @@ mod tests {
         }));
 
         let mut ast = Ast {
+            module_doc: None,
             items: vec![Item::Function(Function {
+                doc: None,
                 directives: smallvec![],
                 visibility: Visibility::Public,
                 is_unchecked: false,

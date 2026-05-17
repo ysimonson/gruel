@@ -174,7 +174,10 @@ mod tests {
     fn empty_ast_round_trips() {
         let cached = CachedParseOutput {
             interner: InternerSnapshot::default(),
-            ast: Ast { items: Vec::new() },
+            ast: Ast {
+                module_doc: None,
+                items: Vec::new(),
+            },
         };
         let bytes = cached.encode().unwrap();
         let decoded = CachedParseOutput::decode(&bytes).unwrap();

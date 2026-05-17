@@ -157,6 +157,7 @@ fn encode_link_extern(
     // field to LinkExternBlock fails to compile here until it's
     // explicitly handled (or `_`-bound).
     let gruel_parser::ast::LinkExternBlock {
+        doc: _,
         library,
         items,
         link_mode: _,
@@ -167,6 +168,7 @@ fn encode_link_extern(
     h.update(&[0]);
     for item in items {
         let gruel_parser::ast::ExternFn {
+            doc: _,
             directives: _,
             name,
             params,
@@ -181,6 +183,7 @@ fn encode_link_extern(
 
 fn encode_function(h: &mut Hasher, f: &Function, interner: &ThreadedRodeo) {
     let Function {
+        doc: _,
         directives: _,
         visibility: _,
         is_unchecked,
@@ -199,6 +202,7 @@ fn encode_function(h: &mut Hasher, f: &Function, interner: &ThreadedRodeo) {
 
 fn encode_struct(h: &mut Hasher, s: &StructDecl, interner: &ThreadedRodeo) {
     let StructDecl {
+        doc: _,
         directives: _,
         visibility: _,
         posture: _,
@@ -229,6 +233,7 @@ fn encode_struct(h: &mut Hasher, s: &StructDecl, interner: &ThreadedRodeo) {
 
 fn encode_enum(h: &mut Hasher, e: &EnumDecl, interner: &ThreadedRodeo) {
     let EnumDecl {
+        doc: _,
         directives: _,
         visibility: _,
         posture: _,
@@ -254,6 +259,7 @@ fn encode_enum(h: &mut Hasher, e: &EnumDecl, interner: &ThreadedRodeo) {
 
 fn encode_interface(h: &mut Hasher, i: &InterfaceDecl, interner: &ThreadedRodeo) {
     let InterfaceDecl {
+        doc: _,
         directives: _,
         visibility: _,
         name,
@@ -270,6 +276,7 @@ fn encode_interface(h: &mut Hasher, i: &InterfaceDecl, interner: &ThreadedRodeo)
 
 fn encode_derive(h: &mut Hasher, d: &DeriveDecl, interner: &ThreadedRodeo) {
     let DeriveDecl {
+        doc: _,
         name,
         methods,
         span: _,
@@ -284,6 +291,7 @@ fn encode_derive(h: &mut Hasher, d: &DeriveDecl, interner: &ThreadedRodeo) {
 
 fn encode_const(h: &mut Hasher, c: &ConstDecl, interner: &ThreadedRodeo) {
     let ConstDecl {
+        doc: _,
         directives: _,
         visibility: _,
         name,
@@ -421,6 +429,7 @@ fn encode_type(h: &mut Hasher, ty: &TypeExpr, interner: &ThreadedRodeo) {
 
 fn encode_field(h: &mut Hasher, field: &FieldDecl, interner: &ThreadedRodeo) {
     let FieldDecl {
+        doc: _,
         visibility: _,
         name,
         ty,
@@ -431,13 +440,23 @@ fn encode_field(h: &mut Hasher, field: &FieldDecl, interner: &ThreadedRodeo) {
 }
 
 fn encode_anon_field(h: &mut Hasher, field: &AnonStructField, interner: &ThreadedRodeo) {
-    let AnonStructField { name, ty, span: _ } = field;
+    let AnonStructField {
+        doc: _,
+        name,
+        ty,
+        span: _,
+    } = field;
     encode_ident(h, name, interner);
     encode_type(h, ty, interner);
 }
 
 fn encode_variant(h: &mut Hasher, v: &EnumVariant, interner: &ThreadedRodeo) {
-    let EnumVariant { name, kind, span: _ } = v;
+    let EnumVariant {
+        doc: _,
+        name,
+        kind,
+        span: _,
+    } = v;
     encode_ident(h, name, interner);
     match kind {
         EnumVariantKind::Unit => {
@@ -462,6 +481,7 @@ fn encode_variant(h: &mut Hasher, v: &EnumVariant, interner: &ThreadedRodeo) {
 
 fn encode_variant_field(h: &mut Hasher, f: &EnumVariantField, interner: &ThreadedRodeo) {
     let EnumVariantField {
+        doc: _,
         visibility: _,
         name,
         ty,
@@ -473,6 +493,7 @@ fn encode_variant_field(h: &mut Hasher, f: &EnumVariantField, interner: &Threade
 
 fn encode_method_sig(h: &mut Hasher, m: &MethodSig, interner: &ThreadedRodeo) {
     let MethodSig {
+        doc: _,
         directives: _,
         is_unchecked,
         name,
@@ -494,6 +515,7 @@ fn encode_method_sig(h: &mut Hasher, m: &MethodSig, interner: &ThreadedRodeo) {
 
 fn encode_method_sig_from_method(h: &mut Hasher, m: &Method, interner: &ThreadedRodeo) {
     let Method {
+        doc: _,
         directives: _,
         visibility: _,
         is_unchecked,

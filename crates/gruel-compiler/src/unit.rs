@@ -351,7 +351,8 @@ impl<'src> CompilationUnit<'src> {
             let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
             interner = returned_interner;
             let parser = Parser::new(tokens, interner)
-                .with_preview_features(self.options.preview_features.clone());
+                .with_preview_features(self.options.preview_features.clone())
+                .with_source(&*file.source);
             let (ast, returned_interner) = parser.parse()?;
             interner = returned_interner;
             parsed_files.push(ParsedFileData {
@@ -371,7 +372,8 @@ impl<'src> CompilationUnit<'src> {
             root_lexer.tokenize().map_err(CompileErrors::from)?;
         interner = returned_interner;
         let root_parser = Parser::new(root_tokens, interner)
-            .with_preview_features(self.options.preview_features.clone());
+            .with_preview_features(self.options.preview_features.clone())
+            .with_source(&*resolved.root.source);
         let (root_ast, returned_interner) = root_parser.parse()?;
         interner = returned_interner;
         parsed_files.push(ParsedFileData {
@@ -421,7 +423,8 @@ impl<'src> CompilationUnit<'src> {
 
                 // Parse
                 let parser = Parser::new(tokens, interner)
-                    .with_preview_features(self.options.preview_features.clone());
+                    .with_preview_features(self.options.preview_features.clone())
+                    .with_source(source.source);
                 let (ast, returned_interner) = parser.parse()?;
                 interner = returned_interner;
 
@@ -611,7 +614,10 @@ impl<'src> CompilationUnit<'src> {
             "symbol merging complete"
         );
 
-        Ok(Ast { items: all_items })
+        Ok(Ast {
+            module_doc: None,
+            items: all_items,
+        })
     }
 
     // =========================================================================

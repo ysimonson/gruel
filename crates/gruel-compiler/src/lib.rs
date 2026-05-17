@@ -175,7 +175,9 @@ pub fn parse_all_files_with_preview(
         interner = returned_interner;
 
         // Parse the tokens - propagate error immediately (interner is consumed)
-        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
+        let parser = Parser::new(tokens, interner)
+            .with_preview_features(preview_features.clone())
+            .with_source(source.source);
         let (ast, returned_interner) = parser.parse()?;
         interner = returned_interner;
 
@@ -414,7 +416,10 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
     );
 
     Ok(MergedProgram {
-        ast: Ast { items: all_items },
+        ast: Ast {
+            module_doc: None,
+            items: all_items,
+        },
         interner: program.interner,
     })
 }
@@ -800,14 +805,19 @@ pub fn prepend_prelude(
             Lexer::with_interner_and_file_id(&file.source, interner, FileId::new(prelude_file_id));
         let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
         interner = returned_interner;
-        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
+        let parser = Parser::new(tokens, interner)
+            .with_preview_features(preview_features.clone())
+            .with_source(&*file.source);
         let (parsed, returned_interner) = parser.parse()?;
         interner = returned_interner;
         all_items.extend(parsed.items);
         prelude_file_id = prelude_file_id.wrapping_sub(1);
     }
 
-    let mut merged = Ast { items: all_items };
+    let mut merged = Ast {
+        module_doc: None,
+        items: all_items,
+    };
     merged.items.extend(ast.items);
     Ok((merged, interner))
 }
@@ -864,7 +874,9 @@ pub fn compile_frontend_with_options_full(
     // Parsing - errors here are fatal (can't continue without AST)
     let (ast, interner) = {
         let _span = info_span!("parser").entered();
-        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
+        let parser = Parser::new(tokens, interner)
+            .with_preview_features(preview_features.clone())
+            .with_source(source);
         let (ast, interner) = parser.parse()?;
         info!(item_count = ast.items.len(), "parsing complete");
         (ast, interner)

@@ -1504,6 +1504,7 @@ impl<'a> AstGen<'a> {
                     span: anon_fn.span,
                 };
                 let synth_method = Method {
+                    doc: None,
                     directives: Directives::new(),
                     visibility: gruel_parser::ast::Visibility::Public,
                     is_unchecked: false,
