@@ -7,7 +7,7 @@
 //! enabled — without these the output looks noticeably worse than what
 //! users expect from `cargo doc`.
 
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{Options, Parser, html};
 
 use crate::links::LinkTable;
 use crate::{DocFile, DocItem};

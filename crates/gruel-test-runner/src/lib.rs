@@ -687,25 +687,23 @@ fn stage_to_header_name(stage: &str) -> &'static str {
 
 /// Run a golden test for a specific IR stage.
 ///
-/// This helper runs `gruel --emit <stage>` on the source file and compares
+/// This helper runs `gruel emit <stage>` on the source file and compares
 /// the output against the expected golden output.
 fn run_golden_ir_test(
     gruel_binary: &Path,
     source_path: &Path,
     stage: &str,
     expected: &str,
-    build_command: impl Fn(&Path) -> Command,
+    emit_command: impl Fn(&Path, &str) -> Command,
 ) -> TestResult {
-    let output = build_command(gruel_binary)
-        .arg("--emit")
-        .arg(stage)
+    let output = emit_command(gruel_binary, stage)
         .arg(source_path)
         .output()
-        .map_err(|e| format!("Failed to run gruel --emit {}: {}", stage, e))?;
+        .map_err(|e| format!("Failed to run gruel emit {}: {}", stage, e))?;
 
     if !output.status.success() {
         return Err(format!(
-            "gruel --emit {} failed:\n{}",
+            "gruel emit {} failed:\n{}",
             stage,
             String::from_utf8_lossy(&output.stderr)
         ));
@@ -846,13 +844,14 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
         aux_paths.push(aux_path);
     }
 
-    // Build base command with target, preview, and optimization flags if needed.
+    // Build the `gruel build ...` base command.
     //
     // ADR-0074: spec/UI tests run in fresh tempdirs and would pay the
     // cache-write overhead without ever warming up. Pass `--no-cache`
     // unconditionally so the per-test invocation skips the cache layer.
     let build_command = |binary: &Path| -> Command {
         let mut cmd = Command::new(binary);
+        cmd.arg("build");
         cmd.arg("--no-cache");
         if let Some(ref target) = case.target {
             cmd.arg("--target").arg(target);
@@ -861,23 +860,40 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
             cmd.arg("--preview").arg(feature);
         }
         if let Some(level) = case.opt_level {
-            cmd.arg(format!("-O{}", level));
+            cmd.arg(format!("--opt-level={}", level));
+        }
+        cmd
+    };
+
+    // Build the `gruel emit <stage> ...` base command. Mirrors
+    // build_command but uses the emit subcommand. Emit doesn't have a
+    // cache layer, so --no-cache is omitted.
+    let emit_command = |binary: &Path, stage: &str| -> Command {
+        let mut cmd = Command::new(binary);
+        cmd.arg("emit");
+        cmd.arg(stage);
+        if let Some(ref target) = case.target {
+            cmd.arg("--target").arg(target);
+        }
+        if let Some(ref feature) = case.preview {
+            cmd.arg("--preview").arg(feature);
+        }
+        if let Some(level) = case.opt_level {
+            cmd.arg(format!("--opt-level={}", level));
         }
         cmd
     };
 
     // Check for asm_contains (LLVM IR substring checks)
     if !case.asm_contains.is_empty() {
-        let output = build_command(gruel_binary)
-            .arg("--emit")
-            .arg("asm")
+        let output = emit_command(gruel_binary, "asm")
             .arg(&source_path)
             .output()
-            .map_err(|e| format!("Failed to run gruel --emit asm: {}", e))?;
+            .map_err(|e| format!("Failed to run gruel emit asm: {}", e))?;
 
         if !output.status.success() {
             return Err(format!(
-                "gruel --emit asm failed:\n{}",
+                "gruel emit asm failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
@@ -904,29 +920,23 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
     {
         // Run dump commands and check golden output
         if let Some(ref expected) = case.expected_tokens {
-            run_golden_ir_test(
-                gruel_binary,
-                &source_path,
-                "tokens",
-                expected,
-                build_command,
-            )?;
+            run_golden_ir_test(gruel_binary, &source_path, "tokens", expected, emit_command)?;
         }
 
         if let Some(ref expected) = case.expected_ast {
-            run_golden_ir_test(gruel_binary, &source_path, "ast", expected, build_command)?;
+            run_golden_ir_test(gruel_binary, &source_path, "ast", expected, emit_command)?;
         }
 
         if let Some(ref expected) = case.expected_rir {
-            run_golden_ir_test(gruel_binary, &source_path, "rir", expected, build_command)?;
+            run_golden_ir_test(gruel_binary, &source_path, "rir", expected, emit_command)?;
         }
 
         if let Some(ref expected) = case.expected_air {
-            run_golden_ir_test(gruel_binary, &source_path, "air", expected, build_command)?;
+            run_golden_ir_test(gruel_binary, &source_path, "air", expected, emit_command)?;
         }
 
         if let Some(ref expected) = case.expected_cfg {
-            run_golden_ir_test(gruel_binary, &source_path, "cfg", expected, build_command)?;
+            run_golden_ir_test(gruel_binary, &source_path, "cfg", expected, emit_command)?;
         }
 
         return Ok(());

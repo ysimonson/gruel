@@ -15,18 +15,18 @@ use crate::ast::{
     SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
     TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
-use gruel_util::span::LineIndex;
-use std::collections::HashMap;
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
 use chumsky::recursive::Direct;
 use gruel_builtins::Posture;
 use gruel_lexer::TokenKind;
+use gruel_util::span::LineIndex;
 use gruel_util::{CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
 use gruel_util::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use chumsky::extra::SimpleState;
 
@@ -3976,12 +3976,10 @@ fn attach_docs(
 
         // Find the next non-doc token after this block (the immediately
         // following item-candidate).
-        let next_non_doc = raw_tokens
-            .iter()
-            .find(|t| {
-                !matches!(t.kind, TokenKind::LineDoc(_) | TokenKind::Eof)
-                    && t.span.start > block.span.end
-            });
+        let next_non_doc = raw_tokens.iter().find(|t| {
+            !matches!(t.kind, TokenKind::LineDoc(_) | TokenKind::Eof)
+                && t.span.start > block.span.end
+        });
         let glued = next_non_doc
             .map(|t| line_index.span_line_number(t.span) == block.end_line + 1)
             .unwrap_or(false);
@@ -6158,10 +6156,7 @@ mod tests {
     fn test_module_doc_then_item_doc() {
         let source = "/// Module docs.\n\n/// Docs for main.\nfn main() -> i32 { 0 }";
         let result = parse_with_docs(source).unwrap();
-        assert_eq!(
-            result.ast.module_doc.as_ref().unwrap().body,
-            "Module docs."
-        );
+        assert_eq!(result.ast.module_doc.as_ref().unwrap().body, "Module docs.");
         match &result.ast.items[0] {
             Item::Function(f) => {
                 assert_eq!(f.doc.as_ref().unwrap().body, "Docs for main.");
@@ -6186,8 +6181,7 @@ mod tests {
     fn test_doc_after_other_item_attaches_to_main() {
         // First item has no docs above it; second item has a glued doc.
         // First block can't be module candidate because helper is above main's docs.
-        let source =
-            "fn helper() {}\n\n/// Docs for main.\nfn main() -> i32 { 0 }";
+        let source = "fn helper() {}\n\n/// Docs for main.\nfn main() -> i32 { 0 }";
         let result = parse_with_docs(source).unwrap();
         assert!(result.ast.module_doc.is_none());
         match &result.ast.items[1] {

@@ -35,35 +35,53 @@ cargo test -p gruel-lexer
 cargo run -p gruel-spec -- "1.1"  # Section 1.1
 cargo run -p gruel-spec -- "zero" # Tests matching "zero"
 
+# The CLI is split into subcommands: `build`, `run`, `check`, `doc`, `emit`, `cache`.
+# Run `cargo run -p gruel -- --help` for the full list.
+
 # Compile and run a one-off program (preferred for quick tests)
 # Write source with the Write tool to scratch/test.gruel, then:
-cargo run -p gruel -- scratch/test.gruel scratch/test_out && ./scratch/test_out
+cargo run -p gruel -- run scratch/test.gruel
+# (or, to keep the binary around)
+cargo run -p gruel -- build scratch/test.gruel scratch/test_out && ./scratch/test_out
+
+# Type-check without producing a binary
+cargo run -p gruel -- check source.gruel
+
+# Run a compiled program, forwarding args after `--`
+cargo run -p gruel -- run source.gruel -- arg1 arg2
 
 # Compile and run a program (single file)
-cargo run -p gruel -- source.gruel output
+cargo run -p gruel -- build source.gruel output
 ./output
 
 # Compile multiple files into one program
-cargo run -p gruel -- main.gruel utils.gruel math.gruel -o program
+cargo run -p gruel -- build main.gruel utils.gruel math.gruel -o program
 ./program
 
 # With shell glob expansion
-cargo run -p gruel -- src/*.gruel -o program
+cargo run -p gruel -- build src/*.gruel -o program
 
-# Note: -o is required when compiling multiple files
-cargo run -p gruel -- a.gruel b.gruel          # Error!
-cargo run -p gruel -- a.gruel b.gruel -o out   # OK
+# Note: -o is required when compiling 3+ files (2 positionals → source + output)
+cargo run -p gruel -- build a.gruel b.gruel c.gruel        # Error!
+cargo run -p gruel -- build a.gruel b.gruel c.gruel -o out # OK
 
-# Emit intermediate representations (can specify multiple stages)
-cargo run -p gruel -- --emit tokens source.gruel  # Lexer tokens
-cargo run -p gruel -- --emit ast source.gruel     # Abstract syntax tree
-cargo run -p gruel -- --emit rir source.gruel     # Untyped IR
-cargo run -p gruel -- --emit air source.gruel     # Typed IR
-cargo run -p gruel -- --emit cfg source.gruel     # Control flow graph
-cargo run -p gruel -- --emit asm source.gruel     # LLVM IR (.ll format)
+# Emit intermediate representations (stages are comma-separated)
+cargo run -p gruel -- emit tokens source.gruel  # Lexer tokens
+cargo run -p gruel -- emit ast source.gruel     # Abstract syntax tree
+cargo run -p gruel -- emit rir source.gruel     # Untyped IR
+cargo run -p gruel -- emit air source.gruel     # Typed IR
+cargo run -p gruel -- emit cfg source.gruel     # Control flow graph
+cargo run -p gruel -- emit asm source.gruel     # LLVM IR (.ll format)
 
 # Chain multiple stages to see the full pipeline
-cargo run -p gruel -- --emit tokens --emit ast --emit rir source.gruel
+cargo run -p gruel -- emit tokens,ast,rir source.gruel
+
+# Generate docs (ADR-0089)
+cargo run -p gruel -- doc --format markdown --output-dir target/doc src/*.gruel
+
+# Manage the incremental compilation cache (ADR-0074)
+cargo run -p gruel -- cache stats
+cargo run -p gruel -- cache clean
 ```
 
 ## Architecture
@@ -75,8 +93,8 @@ graph LR
     Source --> Lexer --> Parser --> AstGen --> Sema --> CfgBuilder --> LLVM --> Link
 ```
 
-| Stage | Pass | IR Produced | `--emit` flag |
-|-------|------|-------------|---------------|
+| Stage | Pass | IR Produced | `gruel emit` stage |
+|-------|------|-------------|--------------------|
 | 1 | Lexer | tokens | `tokens` |
 | 2 | Parser | AST | `ast` |
 | 3 | AstGen | RIR (untyped) | `rir` |
@@ -105,7 +123,7 @@ graph LR
 | `gruel-fuzz` | Fuzz testing infrastructure |
 | `gruel-runtime` | Runtime support |
 | `gruel-builtins` | Built-in type definitions (String, future Vec, etc.) |
-| `gruel-doc` | Doc-comment rendering (Markdown + HTML), driven by `gruel --doc` (ADR-0089) |
+| `gruel-doc` | Doc-comment rendering (Markdown + HTML), driven by `gruel doc` (ADR-0089) |
 
 ### Multi-File Compilation
 
@@ -113,7 +131,7 @@ Gruel supports compiling multiple source files into a single executable:
 
 ```bash
 # All files share a flat global namespace (no modules yet)
-gruel main.gruel utils.gruel lib.gruel -o program
+gruel build main.gruel utils.gruel lib.gruel -o program
 ```
 
 **Key semantics:**
@@ -491,7 +509,7 @@ Crash inputs are saved to `fuzz/artifacts/<target>/`:
 cargo +nightly fuzz run lexer fuzz/artifacts/lexer/crash-*
 
 # Or compile the crashing input directly
-cargo run -p gruel -- fuzz/artifacts/compiler/crash-*.txt output
+cargo run -p gruel -- build fuzz/artifacts/compiler/crash-*.txt -o output
 ```
 
 ## Modifying the Language
@@ -589,7 +607,7 @@ When all tests pass and the feature is complete:
 
 9. **Run `make test`** to verify all tests pass and traceability is maintained
 
-### Doc comments and `--doc`
+### Doc comments and `gruel doc`
 
 `///` introduces a doc comment (ADR-0089). Doc blocks attach to the
 following item; a leading doc block separated from the first item by a
@@ -598,11 +616,11 @@ blank line becomes the module doc. The parser stores them on
 `StructDecl`, `FieldDecl`, etc.). Sema and later stages ignore the
 field — it's purely for downstream tooling.
 
-The `gruel --doc=<markdown|html>` early-return mode walks the parsed
-AST and writes a `cargo doc`-style site under `target/doc/`. The
-generator lives in `gruel-doc`; the binary's `run_doc` wrapper drives
-it. Sema is not run, so `--doc` works on code that doesn't yet
-type-check.
+The `gruel doc --format=<markdown|html>` subcommand walks the parsed
+AST and writes a `cargo doc`-style site under `target/doc/` (override
+with `--output-dir`). The generator lives in `gruel-doc`; the binary's
+`run_doc` wrapper drives it. Sema is not run, so `gruel doc` works on
+code that doesn't yet type-check.
 
 To refresh the website's bundled stdlib/prelude pages after editing a
 docstring:
@@ -663,20 +681,20 @@ Gruel uses the `tracing` crate for structured logging, following the **"wide eve
 
 ```bash
 # Normal compilation (no logging by default)
-gruel source.gruel output
+gruel build source.gruel -o output
 
 # Show timing per pass
-gruel --time-passes source.gruel output
+gruel build --time-passes source.gruel -o output
 
-# Enable debug logging
-gruel --log-level=debug source.gruel output
-RUST_LOG=debug gruel source.gruel output
+# Enable debug logging (--log-level is global, so it works before or after the subcommand)
+gruel --log-level=debug build source.gruel -o output
+RUST_LOG=debug gruel build source.gruel -o output
 
 # JSON format for tooling integration
-gruel --log-format=json --log-level=debug source.gruel output
+gruel --log-format=json --log-level=debug build source.gruel -o output
 
 # Filter to specific module
-RUST_LOG=gruel_compiler::sema=trace gruel source.gruel output
+RUST_LOG=gruel_compiler::sema=trace gruel build source.gruel -o output
 ```
 
 ### Adding Instrumentation

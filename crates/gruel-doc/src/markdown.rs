@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::links::{rewrite, LinkTable};
+use crate::links::{LinkTable, rewrite};
 use crate::{DocFile, DocItem, ItemKind, NamedDoc};
 
 /// Render the per-file index page (`<file>/index.md`) listing every
@@ -66,12 +66,9 @@ fn render_sections(out: &mut String, item: &DocItem, table: &LinkTable) {
     render_named_section(out, "Methods", &item.detail.methods, table);
     if !item.detail.extern_fns.is_empty() {
         match item.kind {
-            ItemKind::LinkExtern => render_named_section(
-                out,
-                "Extern functions",
-                &item.detail.extern_fns,
-                table,
-            ),
+            ItemKind::LinkExtern => {
+                render_named_section(out, "Extern functions", &item.detail.extern_fns, table)
+            }
             _ => render_named_section(out, "Functions", &item.detail.extern_fns, table),
         }
     }

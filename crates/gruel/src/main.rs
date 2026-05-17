@@ -3,10 +3,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::path::Path;
-#[cfg(target_os = "macos")]
 use std::process::Command;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -38,6 +37,23 @@ enum EmitStage {
     Cfg,
     /// Emit LLVM IR (human-readable `.ll` format).
     Asm,
+}
+
+impl EmitStage {
+    fn from_name(s: &str) -> Result<Self, String> {
+        match s {
+            "tokens" => Ok(EmitStage::Tokens),
+            "ast" => Ok(EmitStage::Ast),
+            "rir" => Ok(EmitStage::Rir),
+            "air" => Ok(EmitStage::Air),
+            "cfg" => Ok(EmitStage::Cfg),
+            "asm" => Ok(EmitStage::Asm),
+            other => Err(format!(
+                "unknown emit stage '{}' (expected tokens|ast|rir|air|cfg|asm)",
+                other
+            )),
+        }
+    }
 }
 
 /// Log level for tracing output.
@@ -75,6 +91,13 @@ enum LogFormat {
     Text,
     /// Machine-readable JSON format.
     Json,
+}
+
+/// ADR-0089: doc output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum DocFormat {
+    Markdown,
+    Html,
 }
 
 /// ADR-0074 Phase 6: print incremental-compilation cache statistics
@@ -128,24 +151,50 @@ fn run_cache_stats(dir: &std::path::Path) {
     );
 }
 
-/// ADR-0074 Phase 6: wipe the cache directory.
+fn run_cache_clean(dir: &std::path::Path) {
+    if !dir.exists() {
+        println!("cache directory {} already clean", dir.display());
+        return;
+    }
+    let store = match CacheStore::open(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error opening cache at {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = store.clean() {
+        eprintln!("error cleaning cache: {}", e);
+        std::process::exit(1);
+    }
+    println!("cleaned cache at {}", dir.display());
+}
+
 /// ADR-0089: parse each source file and write per-file docs.
 ///
-/// `--doc` is independent of sema/codegen: we run lexer + parser only
-/// (with the `docs` preview already known to be enabled) and hand the
-/// resulting AST + interner to `gruel_doc::DocSite`.
-fn run_doc(format: DocFormat, options: &Options, sources: &[(String, String)]) {
+/// The doc subcommand is independent of sema/codegen: we run lexer +
+/// parser only and hand the resulting AST + interner to
+/// `gruel_doc::DocSite`.
+fn run_doc(opts: &DocOpts) {
     use gruel_compiler::Parser;
     use gruel_doc::DocSite;
     use std::path::PathBuf;
 
-    let out_dir = PathBuf::from(&options.doc_output_dir);
+    let sources: Vec<(String, String)> = opts
+        .source_paths
+        .iter()
+        .map(|path| {
+            let content = fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("Error reading {}: {}", path, e);
+                std::process::exit(1);
+            });
+            (path.clone(), content)
+        })
+        .collect();
+
+    let out_dir = PathBuf::from(&opts.output_dir);
     if let Err(e) = std::fs::create_dir_all(&out_dir) {
-        eprintln!(
-            "error creating doc output dir {}: {}",
-            out_dir.display(),
-            e
-        );
+        eprintln!("error creating doc output dir {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
 
@@ -153,11 +202,8 @@ fn run_doc(format: DocFormat, options: &Options, sources: &[(String, String)]) {
 
     for (idx, (path, source)) in sources.iter().enumerate() {
         let file_id = FileId::new((idx + 1) as u32);
-        let lexer = Lexer::with_interner_and_file_id(
-            source.as_str(),
-            lasso::ThreadedRodeo::new(),
-            file_id,
-        );
+        let lexer =
+            Lexer::with_interner_and_file_id(source.as_str(), lasso::ThreadedRodeo::new(), file_id);
         let (tokens, interner) = match lexer.tokenize() {
             Ok(v) => v,
             Err(e) => {
@@ -166,7 +212,7 @@ fn run_doc(format: DocFormat, options: &Options, sources: &[(String, String)]) {
             }
         };
         let parser = Parser::new(tokens, interner)
-            .with_preview_features(options.preview_features.clone())
+            .with_preview_features(opts.preview_features.clone())
             .with_source(source.as_str());
         let (ast, interner) = match parser.parse() {
             Ok(v) => v,
@@ -183,7 +229,7 @@ fn run_doc(format: DocFormat, options: &Options, sources: &[(String, String)]) {
         site.push(file);
     }
 
-    if let Err(e) = write_doc_site(&site, &out_dir, format) {
+    if let Err(e) = write_doc_site(&site, &out_dir, opts.format) {
         eprintln!("error writing docs: {}", e);
         std::process::exit(1);
     }
@@ -239,7 +285,10 @@ fn write_doc_site_html(
 ) -> std::io::Result<()> {
     use gruel_doc::html::{render_html_with, render_index_html_with, render_site_index_html};
 
-    std::fs::write(out_dir.join("index.html"), render_site_index_html(&site.files))?;
+    std::fs::write(
+        out_dir.join("index.html"),
+        render_site_index_html(&site.files),
+    )?;
     for file in &site.files {
         let table = file.link_table();
         let file_dir = out_dir.join(&file.stem);
@@ -254,31 +303,11 @@ fn write_doc_site_html(
             .map(|i| (i.slug.clone(), format!("{} {}", i.kind.label(), i.name)))
             .collect();
         for item in &file.items {
-            let page =
-                render_html_with(item, &file.stem, &siblings, "index.html", &table);
+            let page = render_html_with(item, &file.stem, &siblings, "index.html", &table);
             std::fs::write(file_dir.join(format!("{}.html", item.slug)), page)?;
         }
     }
     Ok(())
-}
-
-fn run_cache_clean(dir: &std::path::Path) {
-    if !dir.exists() {
-        println!("cache directory {} already clean", dir.display());
-        return;
-    }
-    let store = match CacheStore::open(dir) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error opening cache at {}: {}", dir.display(), e);
-            std::process::exit(1);
-        }
-    };
-    if let Err(e) = store.clean() {
-        eprintln!("error cleaning cache: {}", e);
-        std::process::exit(1);
-    }
-    println!("cleaned cache at {}", dir.display());
 }
 
 fn human_bytes(n: u64) -> String {
@@ -310,14 +339,48 @@ const VERSION: &str = env!("GRUEL_VERSION");
     name = "gruel",
     version = VERSION,
     about = "Gruel compiler",
-    long_about = "Usage: gruel [options] <source.gruel> [output]\n       gruel [options] <source1.gruel> <source2.gruel> ... -o <output>",
+    long_about = "Gruel compiler.\n\nGlobal options (--log-level, --log-format) work before or after the subcommand. \
+                  Each subcommand has its own option set.",
     disable_help_subcommand = true,
 )]
 struct Cli {
+    /// Set logging level.
+    #[arg(long, value_name = "LEVEL", default_value = "off", global = true)]
+    log_level: LogLevel,
+
+    /// Set logging format.
+    #[arg(long, value_name = "FMT", default_value = "text", global = true)]
+    log_format: LogFormat,
+
+    #[command(subcommand)]
+    command: CliCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum CliCommand {
+    /// Compile sources to a binary.
+    Build(BuildArgs),
+    /// Compile sources to a temporary binary and execute it.
+    Run(RunArgs),
+    /// Type-check sources without producing a binary.
+    Check(CheckArgs),
+    /// Generate documentation (ADR-0089).
+    Doc(DocArgs),
+    /// Emit intermediate representation(s) and exit.
+    Emit(EmitArgs),
+    /// Manage the incremental compilation cache (ADR-0074).
+    Cache {
+        #[command(subcommand)]
+        action: CacheActionArgs,
+    },
+}
+
+#[derive(Args, Debug)]
+struct BuildArgs {
     /// Source files to compile. Multiple files require -o/--output.
     sources: Vec<String>,
 
-    /// Output path (required for multiple source files).
+    /// Output binary path (required for multiple source files).
     #[arg(short, long, value_name = "PATH")]
     output: Option<String>,
 
@@ -350,21 +413,9 @@ struct Cli {
     #[arg(short = 'j', long, value_name = "N", default_value_t = 0)]
     jobs: usize,
 
-    /// Emit intermediate representation and exit (can be repeated).
-    #[arg(long, value_name = "STAGE")]
-    emit: Vec<EmitStage>,
-
     /// Enable a preview feature (can be repeated).
     #[arg(long, value_name = "FEATURE")]
     preview: Vec<PreviewFeature>,
-
-    /// Set logging level.
-    #[arg(long, value_name = "LEVEL", default_value = "off")]
-    log_level: LogLevel,
-
-    /// Set logging format.
-    #[arg(long, value_name = "FMT", default_value = "text")]
-    log_format: LogFormat,
 
     /// Suppress stderr printing of comptime @dbg output (still buffered).
     #[arg(long)]
@@ -387,98 +438,291 @@ struct Cli {
 
     /// Disable the incremental-compilation cache for this build
     /// (ADR-0074). Overrides `--cache-dir` and `GRUEL_CACHE_DIR`.
-    #[arg(long, conflicts_with_all = ["cache_stats", "cache_clean"])]
+    #[arg(long)]
     no_cache: bool,
+}
 
-    /// Print incremental-compilation cache statistics and exit
-    /// (ADR-0074). Defaults to `./target/gruel-cache/` when neither
-    /// `--cache-dir` nor `GRUEL_CACHE_DIR` is set.
-    #[arg(long, conflicts_with = "cache_clean")]
-    cache_stats: bool,
+#[derive(Args, Debug)]
+struct RunArgs {
+    /// Source files to compile.
+    sources: Vec<String>,
 
-    /// Wipe the incremental-compilation cache directory and exit
-    /// (ADR-0074). Defaults to `./target/gruel-cache/` when neither
-    /// `--cache-dir` nor `GRUEL_CACHE_DIR` is set.
-    #[arg(long, conflicts_with = "cache_stats")]
-    cache_clean: bool,
+    /// Arguments to forward to the compiled program (everything after `--`).
+    #[arg(last = true)]
+    program_args: Vec<String>,
 
-    /// ADR-0089: emit documentation for the given sources and exit.
-    /// `markdown` produces one Markdown file per item; `html` produces a
-    /// minimal HTML site with a sidebar of siblings.
+    /// Compilation target.
+    #[arg(long, value_name = "TARGET", default_value_t = Target::host())]
+    target: Target,
+
+    /// Linker to use: "internal" or a system command like "clang".
+    #[arg(long, value_name = "LINKER")]
+    linker: Option<String>,
+
+    /// Optimization level (0..3).
     #[arg(
         long,
-        value_name = "FORMAT",
-        conflicts_with_all = ["emit", "cache_stats", "cache_clean"],
+        value_name = "N",
+        value_parser = clap::value_parser!(u8).range(0..=3),
+        conflicts_with_all = ["debug", "release"],
     )]
-    doc: Option<DocFormat>,
+    opt_level: Option<u8>,
 
-    /// ADR-0089: directory for `--doc` output. Defaults to `target/doc/`.
+    /// Build without optimizations (equivalent to --opt-level=0).
+    #[arg(long, conflicts_with = "release")]
+    debug: bool,
+
+    /// Build with full optimizations (equivalent to --opt-level=3).
+    #[arg(long)]
+    release: bool,
+
+    /// Number of parallel jobs (0 = auto-detect).
+    #[arg(short = 'j', long, value_name = "N", default_value_t = 0)]
+    jobs: usize,
+
+    /// Enable a preview feature (can be repeated).
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
+
+    /// Suppress stderr printing of comptime @dbg output (still buffered).
+    #[arg(long)]
+    capture_comptime_dbg: bool,
+
+    /// Show timing for each compilation pass.
+    #[arg(long)]
+    time_passes: bool,
+
+    /// Cache directory for incremental compilation (ADR-0074).
+    #[arg(long, value_name = "PATH", env = "GRUEL_CACHE_DIR")]
+    cache_dir: Option<String>,
+
+    /// Disable the incremental-compilation cache for this build (ADR-0074).
+    #[arg(long)]
+    no_cache: bool,
+}
+
+#[derive(Args, Debug)]
+struct CheckArgs {
+    /// Source files to type-check.
+    sources: Vec<String>,
+
+    /// Compilation target (affects `@target_arch()` / `@target_os()`).
+    #[arg(long, value_name = "TARGET", default_value_t = Target::host())]
+    target: Target,
+
+    /// Enable a preview feature (can be repeated).
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
+
+    /// Suppress stderr printing of comptime @dbg output (still buffered).
+    #[arg(long)]
+    capture_comptime_dbg: bool,
+
+    /// Show timing for each compilation pass.
+    #[arg(long)]
+    time_passes: bool,
+
+    /// Output timing as JSON (for benchmarking).
+    #[arg(long)]
+    benchmark_json: bool,
+}
+
+#[derive(Args, Debug)]
+struct DocArgs {
+    /// Source files to document.
+    sources: Vec<String>,
+
+    /// Output format.
+    #[arg(long, value_name = "FORMAT", default_value = "markdown")]
+    format: DocFormat,
+
+    /// Output directory.
     #[arg(long, value_name = "DIR", default_value = "target/doc")]
-    doc_output_dir: String,
+    output_dir: String,
+
+    /// Enable a preview feature (can be repeated).
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
 }
 
-/// ADR-0089: doc output format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-enum DocFormat {
-    Markdown,
-    Html,
+#[derive(Args, Debug)]
+struct EmitArgs {
+    /// Comma-separated list of stages: tokens,ast,rir,air,cfg,asm
+    #[arg(value_name = "STAGES")]
+    stages: String,
+
+    /// Source files to compile.
+    sources: Vec<String>,
+
+    /// Compilation target.
+    #[arg(long, value_name = "TARGET", default_value_t = Target::host())]
+    target: Target,
+
+    /// Optimization level (0..3).
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u8).range(0..=3),
+        conflicts_with_all = ["debug", "release"],
+    )]
+    opt_level: Option<u8>,
+
+    /// Build without optimizations (equivalent to --opt-level=0).
+    #[arg(long, conflicts_with = "release")]
+    debug: bool,
+
+    /// Build with full optimizations (equivalent to --opt-level=3).
+    #[arg(long)]
+    release: bool,
+
+    /// Enable a preview feature (can be repeated).
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
+
+    /// Suppress stderr printing of comptime @dbg output (still buffered).
+    #[arg(long)]
+    capture_comptime_dbg: bool,
+
+    /// Show timing for each compilation pass.
+    #[arg(long)]
+    time_passes: bool,
+
+    /// Output timing as JSON (for benchmarking).
+    #[arg(long)]
+    benchmark_json: bool,
 }
 
-struct Options {
-    /// Source files to compile. In single-file mode, contains one path.
-    /// In multi-file mode, contains multiple paths.
+#[derive(Subcommand, Debug)]
+enum CacheActionArgs {
+    /// Print cache statistics.
+    Stats {
+        /// Cache directory (defaults to `target/gruel-cache`).
+        #[arg(
+            long,
+            value_name = "PATH",
+            env = "GRUEL_CACHE_DIR",
+            default_value = "target/gruel-cache"
+        )]
+        cache_dir: String,
+    },
+    /// Wipe the cache directory.
+    Clean {
+        /// Cache directory (defaults to `target/gruel-cache`).
+        #[arg(
+            long,
+            value_name = "PATH",
+            env = "GRUEL_CACHE_DIR",
+            default_value = "target/gruel-cache"
+        )]
+        cache_dir: String,
+    },
+}
+
+/// Resolved global options (the bits independent of subcommand).
+struct GlobalOpts {
+    log_level: LogLevel,
+    log_format: LogFormat,
+}
+
+/// Resolved options for `gruel build`.
+struct BuildOpts {
     source_paths: Vec<String>,
     output_path: String,
-    emit_stages: Vec<EmitStage>,
     target: Target,
     linker: LinkerMode,
     opt_level: OptLevel,
+    jobs: usize,
     preview_features: PreviewFeatures,
-    log_level: LogLevel,
-    log_format: LogFormat,
+    capture_comptime_dbg: bool,
     time_passes: bool,
     benchmark_json: bool,
-    /// Number of parallel jobs (0 = auto-detect, use all cores).
-    jobs: usize,
-    /// When true, suppress stderr printing of comptime `@dbg` output.
-    capture_comptime_dbg: bool,
-    /// Optional explicit cache directory (ADR-0074). When `None`, the
-    /// driver defaults to `target/gruel-cache/` next to the first
-    /// source file. Ignored when `no_cache` is true.
     cache_dir: Option<String>,
-    /// Disable the incremental-compilation cache for this build
-    /// (ADR-0074). Overrides `cache_dir` / `GRUEL_CACHE_DIR`.
     no_cache: bool,
-    /// Cache subcommands (ADR-0074): when set, the driver performs the
-    /// requested cache action and exits before any compilation work. At
-    /// most one may be set; clap enforces.
-    cache_stats: bool,
-    cache_clean: bool,
-    /// ADR-0089: `--doc` format, when set. The driver early-returns
-    /// before normal compilation.
-    doc: Option<DocFormat>,
-    /// ADR-0089: `--doc-output-dir`; defaulted by clap to `target/doc`.
-    doc_output_dir: String,
+}
+
+/// Resolved options for `gruel run`.
+struct RunOpts {
+    source_paths: Vec<String>,
+    program_args: Vec<String>,
+    target: Target,
+    linker: LinkerMode,
+    opt_level: OptLevel,
+    jobs: usize,
+    preview_features: PreviewFeatures,
+    capture_comptime_dbg: bool,
+    time_passes: bool,
+    cache_dir: Option<String>,
+    no_cache: bool,
+}
+
+/// Resolved options for `gruel check`.
+struct CheckOpts {
+    source_paths: Vec<String>,
+    target: Target,
+    preview_features: PreviewFeatures,
+    capture_comptime_dbg: bool,
+    time_passes: bool,
+    benchmark_json: bool,
+}
+
+/// Resolved options for `gruel doc`.
+struct DocOpts {
+    source_paths: Vec<String>,
+    format: DocFormat,
+    output_dir: String,
+    preview_features: PreviewFeatures,
+}
+
+/// Resolved options for `gruel emit`.
+struct EmitOpts {
+    source_paths: Vec<String>,
+    stages: Vec<EmitStage>,
+    target: Target,
+    opt_level: OptLevel,
+    preview_features: PreviewFeatures,
+    capture_comptime_dbg: bool,
+    time_passes: bool,
+    benchmark_json: bool,
+}
+
+/// Resolved options for `gruel cache <action>`.
+enum CacheOpts {
+    Stats { cache_dir: String },
+    Clean { cache_dir: String },
+}
+
+/// The fully-resolved CLI command, after defaults/conflicts have been
+/// normalized.
+enum ResolvedCommand {
+    Build(BuildOpts),
+    Run(RunOpts),
+    Check(CheckOpts),
+    Doc(DocOpts),
+    Emit(EmitOpts),
+    Cache(CacheOpts),
+}
+
+struct ParsedCli {
+    globals: GlobalOpts,
+    command: ResolvedCommand,
 }
 
 /// Result of parsing command-line arguments.
 enum ParseResult {
-    /// Successfully parsed options.
-    Options(Options),
+    Ok(ParsedCli),
     /// Parsing failed with an error (already printed).
     Error,
     /// User requested help or version (already printed, should exit 0).
     Exit,
 }
 
-fn cli_to_options(cli: Cli) -> Result<Options, String> {
-    // Resolve --debug/--release/--opt-level into a single OptLevel.
-    let opt_level = if cli.debug {
+fn resolve_opt_level(opt_level: Option<u8>, debug: bool, release: bool) -> OptLevel {
+    if debug {
         OptLevel::O0
-    } else if cli.release {
+    } else if release {
         OptLevel::O3
     } else {
-        match cli.opt_level {
+        match opt_level {
             Some(0) => OptLevel::O0,
             Some(1) => OptLevel::O1,
             Some(2) => OptLevel::O2,
@@ -486,107 +730,162 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             None => OptLevel::default(),
             Some(_) => unreachable!("clap value_parser bounds to 0..=3"),
         }
-    };
-
-    // Cache subcommands don't need source files. Synthesize empty
-    // source_paths/output_path so the rest of cli_to_options can ignore
-    // the special case. Compute preview_features locally because the
-    // existing flow does that further down. When neither --cache-dir
-    // nor GRUEL_CACHE_DIR is set, fall back to ./target/gruel-cache/ so
-    // `gruel --cache-stats` / `--cache-clean` work without arguments
-    // from a workspace root.
-    if cli.cache_stats || cli.cache_clean {
-        let preview_features: PreviewFeatures = cli.preview.clone().into_iter().collect();
-        let cache_dir = Some(
-            cli.cache_dir
-                .unwrap_or_else(|| "target/gruel-cache".to_string()),
-        );
-        return Ok(Options {
-            source_paths: Vec::new(),
-            output_path: String::new(),
-            emit_stages: cli.emit,
-            target: cli.target,
-            linker: LinkerMode::default(),
-            opt_level,
-            preview_features,
-            log_level: cli.log_level,
-            log_format: cli.log_format,
-            time_passes: cli.time_passes,
-            benchmark_json: cli.benchmark_json,
-            jobs: cli.jobs,
-            capture_comptime_dbg: cli.capture_comptime_dbg,
-            cache_dir,
-            no_cache: cli.no_cache,
-            cache_stats: cli.cache_stats,
-            cache_clean: cli.cache_clean,
-            doc: None,
-            doc_output_dir: cli.doc_output_dir.clone(),
-        });
     }
+}
 
-    let (source_paths, output_path) = if let Some(out) = cli.output {
-        if cli.sources.is_empty() {
+fn resolve_linker(linker: Option<String>) -> LinkerMode {
+    match linker.as_deref() {
+        None => LinkerMode::default(),
+        Some("internal") => LinkerMode::Internal,
+        Some(cmd) => LinkerMode::System(cmd.to_string()),
+    }
+}
+
+fn resolve_build(args: BuildArgs) -> Result<BuildOpts, String> {
+    let opt_level = resolve_opt_level(args.opt_level, args.debug, args.release);
+    let linker = resolve_linker(args.linker);
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+
+    // Determine source paths and output path. Mirrors the legacy
+    // single-binary CLI: with `-o`, all positionals are sources; without
+    // `-o`, one positional is "source + default a.out", two positionals
+    // are "source + output", three+ is an error.
+    let (source_paths, output_path) = if let Some(out) = args.output {
+        if args.sources.is_empty() {
             return Err("Error: No source file specified".to_string());
         }
-        (cli.sources, out)
-    } else if cli.doc.is_some() {
-        // ADR-0089: `--doc` is an early-return mode and doesn't link an
-        // output binary; the trailing source isn't an output path.
-        if cli.sources.is_empty() {
-            return Err("Error: No source file specified".to_string());
-        }
-        (cli.sources, String::new())
+        (args.sources, out)
     } else {
-        match cli.sources.len() {
+        match args.sources.len() {
             0 => return Err("Error: No source file specified".to_string()),
-            1 => (cli.sources, "a.out".to_string()),
+            1 => (args.sources, "a.out".to_string()),
             2 => {
-                let mut s = cli.sources;
+                let mut s = args.sources;
                 let out = s.pop().unwrap();
                 (s, out)
             }
             _ => {
                 return Err(
                     "Error: multiple source files require -o to specify output path\n\
-                     Usage: gruel a.gruel b.gruel -o output"
+                     Usage: gruel build a.gruel b.gruel -o output"
                         .to_string(),
                 );
             }
         }
     };
 
-    let linker = match cli.linker.as_deref() {
-        None => LinkerMode::default(),
-        Some("internal") => LinkerMode::Internal,
-        Some(cmd) => LinkerMode::System(cmd.to_string()),
-    };
-
-    let preview_features: PreviewFeatures = cli.preview.into_iter().collect();
-
-    Ok(Options {
+    Ok(BuildOpts {
         source_paths,
         output_path,
-        emit_stages: cli.emit,
-        target: cli.target,
+        target: args.target,
         linker,
         opt_level,
+        jobs: args.jobs,
         preview_features,
-        log_level: cli.log_level,
-        log_format: cli.log_format,
-        time_passes: cli.time_passes,
-        benchmark_json: cli.benchmark_json,
-        jobs: cli.jobs,
-        capture_comptime_dbg: cli.capture_comptime_dbg,
-        cache_dir: cli.cache_dir,
-        no_cache: cli.no_cache,
-        cache_stats: cli.cache_stats,
-        cache_clean: cli.cache_clean,
-        doc: cli.doc,
-        doc_output_dir: cli.doc_output_dir,
+        capture_comptime_dbg: args.capture_comptime_dbg,
+        time_passes: args.time_passes,
+        benchmark_json: args.benchmark_json,
+        cache_dir: args.cache_dir,
+        no_cache: args.no_cache,
     })
 }
 
-/// Parse CLI arguments into [`Options`].
+fn resolve_run(args: RunArgs) -> Result<RunOpts, String> {
+    if args.sources.is_empty() {
+        return Err("Error: No source file specified".to_string());
+    }
+    let opt_level = resolve_opt_level(args.opt_level, args.debug, args.release);
+    let linker = resolve_linker(args.linker);
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+    Ok(RunOpts {
+        source_paths: args.sources,
+        program_args: args.program_args,
+        target: args.target,
+        linker,
+        opt_level,
+        jobs: args.jobs,
+        preview_features,
+        capture_comptime_dbg: args.capture_comptime_dbg,
+        time_passes: args.time_passes,
+        cache_dir: args.cache_dir,
+        no_cache: args.no_cache,
+    })
+}
+
+fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
+    if args.sources.is_empty() {
+        return Err("Error: No source file specified".to_string());
+    }
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+    Ok(CheckOpts {
+        source_paths: args.sources,
+        target: args.target,
+        preview_features,
+        capture_comptime_dbg: args.capture_comptime_dbg,
+        time_passes: args.time_passes,
+        benchmark_json: args.benchmark_json,
+    })
+}
+
+fn resolve_doc(args: DocArgs) -> Result<DocOpts, String> {
+    if args.sources.is_empty() {
+        return Err("Error: No source file specified".to_string());
+    }
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+    Ok(DocOpts {
+        source_paths: args.sources,
+        format: args.format,
+        output_dir: args.output_dir,
+        preview_features,
+    })
+}
+
+fn resolve_emit(args: EmitArgs) -> Result<EmitOpts, String> {
+    if args.sources.is_empty() {
+        return Err("Error: No source file specified".to_string());
+    }
+    let opt_level = resolve_opt_level(args.opt_level, args.debug, args.release);
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+    let mut stages = Vec::new();
+    for part in args.stages.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return Err("Error: empty stage in --emit list".to_string());
+        }
+        stages.push(EmitStage::from_name(trimmed).map_err(|e| format!("Error: {}", e))?);
+    }
+    Ok(EmitOpts {
+        source_paths: args.sources,
+        stages,
+        target: args.target,
+        opt_level,
+        preview_features,
+        capture_comptime_dbg: args.capture_comptime_dbg,
+        time_passes: args.time_passes,
+        benchmark_json: args.benchmark_json,
+    })
+}
+
+fn resolve_cli(cli: Cli) -> Result<ParsedCli, String> {
+    let globals = GlobalOpts {
+        log_level: cli.log_level,
+        log_format: cli.log_format,
+    };
+    let command = match cli.command {
+        CliCommand::Build(args) => ResolvedCommand::Build(resolve_build(args)?),
+        CliCommand::Run(args) => ResolvedCommand::Run(resolve_run(args)?),
+        CliCommand::Check(args) => ResolvedCommand::Check(resolve_check(args)?),
+        CliCommand::Doc(args) => ResolvedCommand::Doc(resolve_doc(args)?),
+        CliCommand::Emit(args) => ResolvedCommand::Emit(resolve_emit(args)?),
+        CliCommand::Cache { action } => ResolvedCommand::Cache(match action {
+            CacheActionArgs::Stats { cache_dir } => CacheOpts::Stats { cache_dir },
+            CacheActionArgs::Clean { cache_dir } => CacheOpts::Clean { cache_dir },
+        }),
+    };
+    Ok(ParsedCli { globals, command })
+}
+
+/// Parse CLI arguments into a [`ParsedCli`].
 ///
 /// `argv` accepts anything iterable into [`OsString`] — `std::env::args_os()`
 /// at runtime, or a hand-rolled iterator in tests.
@@ -606,8 +905,8 @@ where
             };
         }
     };
-    match cli_to_options(cli) {
-        Ok(opts) => ParseResult::Options(opts),
+    match resolve_cli(cli) {
+        Ok(parsed) => ParseResult::Ok(parsed),
         Err(msg) => {
             eprintln!("{}", msg);
             ParseResult::Error
@@ -760,42 +1059,46 @@ fn get_peak_memory_bytes() -> Option<u64> {
 }
 
 fn main() {
-    let options = match parse_args(std::env::args_os()) {
-        ParseResult::Options(opts) => opts,
+    let parsed = match parse_args(std::env::args_os()) {
+        ParseResult::Ok(p) => p,
         ParseResult::Exit => std::process::exit(0),
         ParseResult::Error => std::process::exit(1),
     };
 
-    // Initialize tracing based on CLI options
-    // Returns timing data if --time-passes or --benchmark-json was specified
+    // Decide tracing/timing needs from the chosen subcommand.
+    let (time_passes, benchmark_json) = match &parsed.command {
+        ResolvedCommand::Build(o) => (o.time_passes, o.benchmark_json),
+        ResolvedCommand::Run(o) => (o.time_passes, false),
+        ResolvedCommand::Check(o) => (o.time_passes, o.benchmark_json),
+        ResolvedCommand::Emit(o) => (o.time_passes, o.benchmark_json),
+        ResolvedCommand::Doc(_) | ResolvedCommand::Cache(_) => (false, false),
+    };
+
     let timing_data = init_tracing(
-        options.log_level,
-        options.log_format,
-        options.time_passes,
-        options.benchmark_json,
+        parsed.globals.log_level,
+        parsed.globals.log_format,
+        time_passes,
+        benchmark_json,
     );
 
-    // ADR-0074 Phase 6: cache subcommands. Run before any compilation
-    // work since they don't need sources or the rest of the pipeline.
-    if options.cache_stats {
-        let dir = options
-            .cache_dir
-            .as_deref()
-            .expect("validated by cli_to_options");
-        run_cache_stats(std::path::Path::new(dir));
-        return;
+    match parsed.command {
+        ResolvedCommand::Build(opts) => run_build(opts, timing_data),
+        ResolvedCommand::Run(opts) => run_run(opts, timing_data),
+        ResolvedCommand::Check(opts) => run_check(opts, timing_data),
+        ResolvedCommand::Doc(opts) => run_doc(&opts),
+        ResolvedCommand::Emit(opts) => run_emit(opts, timing_data),
+        ResolvedCommand::Cache(CacheOpts::Stats { cache_dir }) => {
+            run_cache_stats(std::path::Path::new(&cache_dir));
+        }
+        ResolvedCommand::Cache(CacheOpts::Clean { cache_dir }) => {
+            run_cache_clean(std::path::Path::new(&cache_dir));
+        }
     }
-    if options.cache_clean {
-        let dir = options
-            .cache_dir
-            .as_deref()
-            .expect("validated by cli_to_options");
-        run_cache_clean(std::path::Path::new(dir));
-        return;
-    }
+}
 
+fn run_build(opts: BuildOpts, timing_data: Option<timing::TimingData>) {
     // Read all source files into memory
-    let sources: Vec<(String, String)> = options
+    let sources: Vec<(String, String)> = opts
         .source_paths
         .iter()
         .map(|path| {
@@ -806,13 +1109,6 @@ fn main() {
             (path.clone(), content)
         })
         .collect();
-
-    // ADR-0089: `--doc` is an early-return mode that parses sources and
-    // writes documentation files; sema/codegen never run.
-    if let Some(format) = options.doc {
-        run_doc(format, &options, &sources);
-        return;
-    }
 
     // Build SourceFile structs for multi-file compilation
     let source_files: Vec<SourceFile<'_>> = sources
@@ -836,16 +1132,13 @@ fn main() {
         .collect();
     let formatter = MultiFileFormatter::new(source_infos);
 
-    // Also keep a single-file formatter for the primary file (for source metrics)
-    let (_primary_path, primary_source) = &sources[0];
-
     // Compute source metrics if benchmark JSON is requested
-    let source_metrics = if options.benchmark_json {
-        // We need token count, so do a quick lex
+    let (_primary_path, primary_source) = &sources[0];
+    let source_metrics = if opts.benchmark_json {
         let lexer = Lexer::new(primary_source);
         let token_count = match lexer.tokenize() {
             Ok((tokens, _interner)) => tokens.len(),
-            Err(_) => 0, // If lexing fails, we'll get the error during compilation anyway
+            Err(_) => 0,
         };
         Some(timing::SourceMetrics {
             bytes: primary_source.len(),
@@ -856,34 +1149,17 @@ fn main() {
         None
     };
 
-    // Handle emit modes with multi-file support
-    if !options.emit_stages.is_empty() {
-        if let Err(()) = handle_emit_multi_file(&source_files, &options, &formatter) {
-            std::process::exit(1);
-        }
-        print_timing_output(
-            &timing_data,
-            options.time_passes,
-            options.benchmark_json,
-            &options.target,
-            source_metrics,
-        );
-        return;
-    }
-
-    // Normal compilation - uses multi-file compilation for all source files.
-    //
     // ADR-0074: incremental compilation cache is enabled by default and
     // routed through `cache_dir`. `--no-cache` disables it for a single
     // build. When no explicit cache_dir / GRUEL_CACHE_DIR is provided,
     // fall back to `target/gruel-cache/` next to the first source file.
-    let resolved_cache_dir = if options.no_cache {
+    let resolved_cache_dir = if opts.no_cache {
         None
     } else {
-        Some(match &options.cache_dir {
+        Some(match &opts.cache_dir {
             Some(p) => std::path::PathBuf::from(p),
             None => {
-                let first = std::path::Path::new(&options.source_paths[0]);
+                let first = std::path::Path::new(&opts.source_paths[0]);
                 first
                     .parent()
                     .unwrap_or_else(|| std::path::Path::new("."))
@@ -893,31 +1169,29 @@ fn main() {
         })
     };
     let compile_options = CompileOptions {
-        target: options.target.clone(),
-        linker: options.linker.clone(),
-        opt_level: options.opt_level,
-        preview_features: options.preview_features.clone(),
-        jobs: options.jobs,
-        capture_comptime_dbg: options.capture_comptime_dbg,
+        target: opts.target.clone(),
+        linker: opts.linker.clone(),
+        opt_level: opts.opt_level,
+        preview_features: opts.preview_features.clone(),
+        jobs: opts.jobs,
+        capture_comptime_dbg: opts.capture_comptime_dbg,
         cache_dir: resolved_cache_dir,
     };
     match compile_multi_file_with_options(&source_files, &compile_options) {
         Ok(output) => {
-            // Print warnings using the diagnostic formatter
             if !output.warnings.is_empty() {
                 eprintln!("{}", formatter.format_warnings(&output.warnings));
             }
 
-            // Write output
-            if let Err(e) = fs::write(&options.output_path, &output.elf) {
-                eprintln!("Error writing {}: {}", options.output_path, e);
+            if let Err(e) = fs::write(&opts.output_path, &output.elf) {
+                eprintln!("Error writing {}: {}", opts.output_path, e);
                 std::process::exit(1);
             }
 
             // Make executable (Unix only)
             #[cfg(unix)]
             {
-                let path = Path::new(&options.output_path);
+                let path = Path::new(&opts.output_path);
                 match fs::metadata(path) {
                     Ok(metadata) => {
                         let mut perms = metadata.permissions();
@@ -925,14 +1199,14 @@ fn main() {
                         if let Err(e) = fs::set_permissions(path, perms) {
                             eprintln!(
                                 "Warning: could not set executable permissions on {}: {}",
-                                options.output_path, e
+                                opts.output_path, e
                             );
                         }
                     }
                     Err(e) => {
                         eprintln!(
                             "Warning: could not read file metadata for {}: {}",
-                            options.output_path, e
+                            opts.output_path, e
                         );
                     }
                 }
@@ -941,10 +1215,9 @@ fn main() {
             // Ad-hoc codesign for macOS (required for executables to run on ARM64)
             #[cfg(target_os = "macos")]
             {
-                // Only codesign if target is macOS (cross-compilation check)
                 if compile_options.target.is_macho() {
                     let result = Command::new("codesign")
-                        .args(["-f", "-s", "-", &options.output_path])
+                        .args(["-f", "-s", "-", &opts.output_path])
                         .output();
                     match result {
                         Ok(output) => {
@@ -964,27 +1237,27 @@ fn main() {
 
             // Don't print normal compilation message when using --benchmark-json
             // as it would interfere with JSON parsing
-            if !options.benchmark_json {
-                let linker_str = match &options.linker {
+            if !opts.benchmark_json {
+                let linker_str = match &opts.linker {
                     LinkerMode::Internal => "internal".to_string(),
                     LinkerMode::System(cmd) => cmd.clone(),
                 };
-                let source_str = if options.source_paths.len() == 1 {
-                    options.source_paths[0].clone()
+                let source_str = if opts.source_paths.len() == 1 {
+                    opts.source_paths[0].clone()
                 } else {
-                    format!("{} files", options.source_paths.len())
+                    format!("{} files", opts.source_paths.len())
                 };
                 println!(
                     "Compiled {} -> {} (target: {}, linker: {})",
-                    source_str, options.output_path, options.target, linker_str
+                    source_str, opts.output_path, opts.target, linker_str
                 );
             }
 
             print_timing_output(
                 &timing_data,
-                options.time_passes,
-                options.benchmark_json,
-                &options.target,
+                opts.time_passes,
+                opts.benchmark_json,
+                &opts.target,
                 source_metrics,
             );
         }
@@ -995,19 +1268,237 @@ fn main() {
     }
 }
 
-/// Handle emit stages for multi-file compilation.
+fn run_emit(opts: EmitOpts, timing_data: Option<timing::TimingData>) {
+    // Read all source files into memory
+    let sources: Vec<(String, String)> = opts
+        .source_paths
+        .iter()
+        .map(|path| {
+            let content = fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("Error reading {}: {}", path, e);
+                std::process::exit(1);
+            });
+            (path.clone(), content)
+        })
+        .collect();
+
+    let source_files: Vec<SourceFile<'_>> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, (path, content))| {
+            SourceFile::new(path.as_str(), content.as_str(), FileId::new((i + 1) as u32))
+        })
+        .collect();
+
+    let source_infos: Vec<_> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, (path, content))| {
+            (
+                FileId::new((i + 1) as u32),
+                SourceInfo::new(content.as_str(), path.as_str()),
+            )
+        })
+        .collect();
+    let formatter = MultiFileFormatter::new(source_infos);
+
+    let (_primary_path, primary_source) = &sources[0];
+    let source_metrics = if opts.benchmark_json {
+        let lexer = Lexer::new(primary_source);
+        let token_count = match lexer.tokenize() {
+            Ok((tokens, _interner)) => tokens.len(),
+            Err(_) => 0,
+        };
+        Some(timing::SourceMetrics {
+            bytes: primary_source.len(),
+            lines: primary_source.lines().count(),
+            tokens: token_count,
+        })
+    } else {
+        None
+    };
+
+    if let Err(()) = emit_stages(&source_files, &opts, &formatter) {
+        std::process::exit(1);
+    }
+    print_timing_output(
+        &timing_data,
+        opts.time_passes,
+        opts.benchmark_json,
+        &opts.target,
+        source_metrics,
+    );
+}
+
+fn run_run(opts: RunOpts, timing_data: Option<timing::TimingData>) {
+    // `run` is "build to a temp path, exec, forward the exit code".
+    // We construct an output path inside `std::env::temp_dir()` keyed by
+    // the first source's file stem so successive runs in the same shell
+    // session overwrite the same file (and `--cache-dir` can do its job).
+    let stem = std::path::Path::new(&opts.source_paths[0])
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "gruel-run".to_string());
+    let pid = std::process::id();
+    let output_path = std::env::temp_dir().join(format!("gruel-run-{}-{}", stem, pid));
+
+    let build_opts = BuildOpts {
+        source_paths: opts.source_paths,
+        output_path: output_path.to_string_lossy().into_owned(),
+        target: opts.target,
+        linker: opts.linker,
+        opt_level: opts.opt_level,
+        jobs: opts.jobs,
+        preview_features: opts.preview_features,
+        capture_comptime_dbg: opts.capture_comptime_dbg,
+        time_passes: opts.time_passes,
+        benchmark_json: false,
+        cache_dir: opts.cache_dir,
+        no_cache: opts.no_cache,
+    };
+
+    // run_build exits the process on compile failure, so if we reach the
+    // line after it the binary is on disk and ready to exec.
+    run_build(build_opts, timing_data);
+
+    let status = Command::new(&output_path)
+        .args(&opts.program_args)
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("Error executing {}: {}", output_path.display(), e);
+            let _ = fs::remove_file(&output_path);
+            std::process::exit(1);
+        });
+
+    let _ = fs::remove_file(&output_path);
+
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    }
+    // Killed by a signal — match shell convention (128 + signal).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            std::process::exit(128 + sig);
+        }
+    }
+    std::process::exit(1);
+}
+
+fn run_check(opts: CheckOpts, timing_data: Option<timing::TimingData>) {
+    use gruel_compiler::{merge_symbols, parse_all_files_with_preview};
+
+    let sources: Vec<(String, String)> = opts
+        .source_paths
+        .iter()
+        .map(|path| {
+            let content = fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("Error reading {}: {}", path, e);
+                std::process::exit(1);
+            });
+            (path.clone(), content)
+        })
+        .collect();
+
+    let source_files: Vec<SourceFile<'_>> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, (path, content))| {
+            SourceFile::new(path.as_str(), content.as_str(), FileId::new((i + 1) as u32))
+        })
+        .collect();
+
+    let source_infos: Vec<_> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, (path, content))| {
+            (
+                FileId::new((i + 1) as u32),
+                SourceInfo::new(content.as_str(), path.as_str()),
+            )
+        })
+        .collect();
+    let formatter = MultiFileFormatter::new(source_infos);
+
+    let (_primary_path, primary_source) = &sources[0];
+    let source_metrics = if opts.benchmark_json {
+        let lexer = Lexer::new(primary_source);
+        let token_count = match lexer.tokenize() {
+            Ok((tokens, _interner)) => tokens.len(),
+            Err(_) => 0,
+        };
+        Some(timing::SourceMetrics {
+            bytes: primary_source.len(),
+            lines: primary_source.lines().count(),
+            tokens: token_count,
+        })
+    } else {
+        None
+    };
+
+    let parsed = match parse_all_files_with_preview(&source_files, &opts.preview_features) {
+        Ok(p) => p,
+        Err(errors) => {
+            eprintln!("{}", formatter.format_errors(&errors));
+            std::process::exit(1);
+        }
+    };
+    let merged = match merge_symbols(parsed) {
+        Ok(m) => m,
+        Err(errors) => {
+            eprintln!("{}", formatter.format_errors(&errors));
+            std::process::exit(1);
+        }
+    };
+    let state = match compile_frontend_from_ast_with_options_full_target(
+        merged.ast,
+        merged.interner,
+        &opts.preview_features,
+        opts.capture_comptime_dbg,
+        &opts.target,
+    ) {
+        Ok(state) => state,
+        Err(errors) => {
+            eprintln!("{}", formatter.format_errors(&errors));
+            std::process::exit(1);
+        }
+    };
+
+    if !state.warnings.is_empty() {
+        eprintln!("{}", formatter.format_warnings(&state.warnings));
+    }
+
+    if !opts.benchmark_json {
+        let source_str = if opts.source_paths.len() == 1 {
+            opts.source_paths[0].clone()
+        } else {
+            format!("{} files", opts.source_paths.len())
+        };
+        println!("Checked {} (target: {})", source_str, opts.target);
+    }
+
+    print_timing_output(
+        &timing_data,
+        opts.time_passes,
+        opts.benchmark_json,
+        &opts.target,
+        source_metrics,
+    );
+}
+
+/// Run the pipeline up to each requested stage and print the output.
 ///
 /// For early stages (tokens, ast), each file is processed and labeled individually.
-/// For later stages (rir, air, cfg, etc.), the merged program is used.
-fn handle_emit_multi_file(
+/// For later stages (rir, air, cfg, asm), the merged program is used.
+fn emit_stages(
     sources: &[SourceFile<'_>],
-    options: &Options,
+    opts: &EmitOpts,
     formatter: &MultiFileFormatter,
 ) -> Result<(), ()> {
-    // Determine which stages we need
-    let needs_tokens = options.emit_stages.contains(&EmitStage::Tokens);
-    let needs_ast = options.emit_stages.contains(&EmitStage::Ast);
-    let needs_later_stages = options.emit_stages.iter().any(|s| {
+    let needs_tokens = opts.stages.contains(&EmitStage::Tokens);
+    let needs_ast = opts.stages.contains(&EmitStage::Ast);
+    let needs_later_stages = opts.stages.iter().any(|s| {
         matches!(
             s,
             EmitStage::Rir | EmitStage::Air | EmitStage::Cfg | EmitStage::Asm
@@ -1015,7 +1506,6 @@ fn handle_emit_multi_file(
     });
 
     // For tokens, we need to lex each file separately (before parsing merges interners)
-    // We'll collect per-file tokens if needed
     let per_file_tokens: Option<Vec<(String, Vec<gruel_compiler::Token>)>> = if needs_tokens {
         let mut file_tokens = Vec::with_capacity(sources.len());
         for source in sources {
@@ -1037,7 +1527,7 @@ fn handle_emit_multi_file(
 
     // Parse all files (needed for AST output or later stages)
     let mut parsed: Option<ParsedProgram> = if needs_ast || needs_later_stages {
-        match gruel_compiler::parse_all_files_with_preview(sources, &options.preview_features) {
+        match gruel_compiler::parse_all_files_with_preview(sources, &opts.preview_features) {
             Ok(program) => Some(program),
             Err(errors) => {
                 eprintln!("{}", formatter.format_errors(&errors));
@@ -1061,9 +1551,7 @@ fn handle_emit_multi_file(
         None
     };
 
-    // Merge symbols and compile frontend (needed for later stages)
     let frontend_state = if needs_later_stages {
-        // Take ownership of the parsed program (already parsed above)
         let program = parsed
             .take()
             .expect("parsed should be Some when needs_later_stages is true");
@@ -1079,9 +1567,9 @@ fn handle_emit_multi_file(
         let state = match compile_frontend_from_ast_with_options_full_target(
             merged.ast,
             merged.interner,
-            &options.preview_features,
-            options.capture_comptime_dbg,
-            &options.target,
+            &opts.preview_features,
+            opts.capture_comptime_dbg,
+            &opts.target,
         ) {
             Ok(state) => state,
             Err(errors) => {
@@ -1095,8 +1583,7 @@ fn handle_emit_multi_file(
         None
     };
 
-    // Now emit in order
-    for stage in &options.emit_stages {
+    for stage in &opts.stages {
         match stage {
             EmitStage::Tokens => {
                 if let Some(ref file_tokens) = per_file_tokens {
@@ -1156,12 +1643,12 @@ fn handle_emit_multi_file(
                         interner: &state.interner,
                         interface_defs: &state.interface_defs,
                         interface_vtables: &state.interface_vtables,
-                        target: &options.target,
-                        // ADR-0085: --emit asm shows IR pre-link; library
+                        target: &opts.target,
+                        // ADR-0085: emit shows IR pre-link; library
                         // flags are linker-only so they don't matter here.
                         extra_link_libraries: &[],
                     };
-                    match generate_llvm_ir(&inputs, options.opt_level) {
+                    match generate_llvm_ir(&inputs, opts.opt_level) {
                         Ok(ir) => print!("{}", ir),
                         Err(e) => {
                             eprintln!("{}", formatter.format_error(&e));
@@ -1190,58 +1677,183 @@ mod tests {
         parse_args(argv)
     }
 
-    /// Helper to extract Options from ParseResult, panicking if not Options.
-    fn unwrap_options(result: ParseResult) -> Options {
+    /// Parse args under the `build` subcommand. Most option-parsing tests
+    /// drive this so we don't have to prefix every fixture with "build".
+    fn parse_build_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("build".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn parse_emit_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("emit".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn parse_doc_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("doc".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn parse_cache_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("cache".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn parse_run_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("run".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn parse_check_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(std::iter::once("check".to_string()))
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
+
+    fn unwrap_build(result: ParseResult) -> (GlobalOpts, BuildOpts) {
         match result {
-            ParseResult::Options(opts) => opts,
-            ParseResult::Error => panic!("Expected Options, got Error"),
-            ParseResult::Exit => panic!("Expected Options, got Exit"),
+            ParseResult::Ok(ParsedCli {
+                globals,
+                command: ResolvedCommand::Build(opts),
+            }) => (globals, opts),
+            ParseResult::Ok(_) => panic!("Expected Build, got different subcommand"),
+            ParseResult::Error => panic!("Expected Build, got Error"),
+            ParseResult::Exit => panic!("Expected Build, got Exit"),
         }
     }
 
-    /// Helper to check if result is an error.
+    fn unwrap_build_opts(result: ParseResult) -> BuildOpts {
+        unwrap_build(result).1
+    }
+
+    fn unwrap_emit_opts(result: ParseResult) -> EmitOpts {
+        match result {
+            ParseResult::Ok(ParsedCli {
+                command: ResolvedCommand::Emit(opts),
+                ..
+            }) => opts,
+            ParseResult::Ok(_) => panic!("Expected Emit, got different subcommand"),
+            ParseResult::Error => panic!("Expected Emit, got Error"),
+            ParseResult::Exit => panic!("Expected Emit, got Exit"),
+        }
+    }
+
+    fn unwrap_doc_opts(result: ParseResult) -> DocOpts {
+        match result {
+            ParseResult::Ok(ParsedCli {
+                command: ResolvedCommand::Doc(opts),
+                ..
+            }) => opts,
+            ParseResult::Ok(_) => panic!("Expected Doc, got different subcommand"),
+            ParseResult::Error => panic!("Expected Doc, got Error"),
+            ParseResult::Exit => panic!("Expected Doc, got Exit"),
+        }
+    }
+
+    fn unwrap_cache_opts(result: ParseResult) -> CacheOpts {
+        match result {
+            ParseResult::Ok(ParsedCli {
+                command: ResolvedCommand::Cache(opts),
+                ..
+            }) => opts,
+            ParseResult::Ok(_) => panic!("Expected Cache, got different subcommand"),
+            ParseResult::Error => panic!("Expected Cache, got Error"),
+            ParseResult::Exit => panic!("Expected Cache, got Exit"),
+        }
+    }
+
+    fn unwrap_run_opts(result: ParseResult) -> RunOpts {
+        match result {
+            ParseResult::Ok(ParsedCli {
+                command: ResolvedCommand::Run(opts),
+                ..
+            }) => opts,
+            ParseResult::Ok(_) => panic!("Expected Run, got different subcommand"),
+            ParseResult::Error => panic!("Expected Run, got Error"),
+            ParseResult::Exit => panic!("Expected Run, got Exit"),
+        }
+    }
+
+    fn unwrap_check_opts(result: ParseResult) -> CheckOpts {
+        match result {
+            ParseResult::Ok(ParsedCli {
+                command: ResolvedCommand::Check(opts),
+                ..
+            }) => opts,
+            ParseResult::Ok(_) => panic!("Expected Check, got different subcommand"),
+            ParseResult::Error => panic!("Expected Check, got Error"),
+            ParseResult::Exit => panic!("Expected Check, got Exit"),
+        }
+    }
+
     fn is_error(result: &ParseResult) -> bool {
         matches!(result, ParseResult::Error)
     }
 
-    /// Helper to check if result is an exit.
     fn is_exit(result: &ParseResult) -> bool {
         matches!(result, ParseResult::Exit)
     }
 
-    // ========== Basic parsing tests ==========
+    // ========== Top-level dispatch ==========
+
+    #[test]
+    fn no_subcommand_is_error() {
+        assert!(is_error(&parse_args_from(&[])));
+    }
+
+    #[test]
+    fn unknown_subcommand_is_error() {
+        assert!(is_error(&parse_args_from(&["banana"])));
+    }
+
+    #[test]
+    fn build_requires_source() {
+        assert!(is_error(&parse_build_from(&[])));
+    }
+
+    // ========== gruel build ==========
 
     #[test]
     fn parse_source_file_only() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.output_path, "a.out");
     }
 
     #[test]
-    fn parse_source_and_output() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel", "output"]));
+    fn parse_source_and_output_two_positionals() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel", "output"]));
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.output_path, "output");
     }
 
     #[test]
-    fn parse_no_args_returns_error() {
-        assert!(is_error(&parse_args_from(&[])));
-    }
-
-    // ========== Multi-file argument parsing tests ==========
-
-    #[test]
     fn parse_multi_file_with_output_flag() {
-        let opts = unwrap_options(parse_args_from(&["a.gruel", "b.gruel", "-o", "output"]));
+        let opts = unwrap_build_opts(parse_build_from(&["a.gruel", "b.gruel", "-o", "output"]));
         assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
         assert_eq!(opts.output_path, "output");
     }
 
     #[test]
     fn parse_multi_file_with_output_long_flag() {
-        let opts = unwrap_options(parse_args_from(&["a.gruel", "b.gruel", "--output", "out"]));
+        let opts = unwrap_build_opts(parse_build_from(&["a.gruel", "b.gruel", "--output", "out"]));
         assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
         assert_eq!(opts.output_path, "out");
     }
@@ -1249,14 +1861,14 @@ mod tests {
     #[test]
     fn parse_multi_file_without_output_flag_error() {
         // Three positional args without -o should error
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "a.gruel", "b.gruel", "c.gruel"
         ])));
     }
 
     #[test]
     fn parse_multi_file_with_options() {
-        let opts = unwrap_options(parse_args_from(&[
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--opt-level=2",
             "main.gruel",
             "utils.gruel",
@@ -1274,103 +1886,71 @@ mod tests {
 
     #[test]
     fn parse_output_flag_before_sources() {
-        let opts = unwrap_options(parse_args_from(&["-o", "output", "a.gruel", "b.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["-o", "output", "a.gruel", "b.gruel"]));
         assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
         assert_eq!(opts.output_path, "output");
     }
 
     #[test]
     fn parse_single_file_with_output_flag() {
-        // Even single file can use -o explicitly
-        let opts = unwrap_options(parse_args_from(&["source.gruel", "-o", "myprogram"]));
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel", "-o", "myprogram"]));
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.output_path, "myprogram");
     }
 
     #[test]
     fn parse_output_flag_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "-o"])));
+        assert!(is_error(&parse_build_from(&["source.gruel", "-o"])));
     }
 
     #[test]
     fn parse_output_long_flag_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--output"])));
+        assert!(is_error(&parse_build_from(&["source.gruel", "--output"])));
     }
 
-    // ========== --emit tests ==========
+    // ========== build defaults ==========
 
     #[test]
-    fn parse_emit_tokens() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "tokens", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Tokens]);
-    }
-
-    #[test]
-    fn parse_emit_ast() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "ast", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Ast]);
+    fn parse_defaults_output_path() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert_eq!(opts.output_path, "a.out");
     }
 
     #[test]
-    fn parse_emit_rir() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "rir", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Rir]);
+    fn parse_defaults_opt_level() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O0);
     }
 
     #[test]
-    fn parse_emit_air() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "air", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Air]);
+    fn parse_defaults_linker() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert_eq!(opts.linker, LinkerMode::Internal);
     }
 
     #[test]
-    fn parse_emit_cfg() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "cfg", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Cfg]);
+    fn parse_defaults_time_passes() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert!(!opts.time_passes);
     }
 
     #[test]
-    fn parse_emit_asm() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "asm", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Asm]);
+    fn parse_defaults_benchmark_json() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert!(!opts.benchmark_json);
     }
 
     #[test]
-    fn parse_multiple_emit_stages() {
-        let opts = unwrap_options(parse_args_from(&[
-            "--emit",
-            "tokens",
-            "--emit",
-            "ast",
-            "--emit",
-            "air",
-            "source.gruel",
-        ]));
-        assert_eq!(
-            opts.emit_stages,
-            vec![EmitStage::Tokens, EmitStage::Ast, EmitStage::Air]
-        );
+    fn parse_defaults_jobs() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
+        assert_eq!(opts.jobs, 0);
     }
 
-    #[test]
-    fn parse_emit_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--emit"])));
-    }
-
-    #[test]
-    fn parse_emit_invalid_stage() {
-        assert!(is_error(&parse_args_from(&[
-            "--emit",
-            "invalid",
-            "source.gruel"
-        ])));
-    }
-
-    // ========== --target tests ==========
+    // ========== build: --target ==========
 
     #[test]
     fn parse_target_x86_64_linux() {
-        let opts = unwrap_options(parse_args_from(&[
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--target",
             "x86_64-linux",
             "source.gruel",
@@ -1380,7 +1960,7 @@ mod tests {
 
     #[test]
     fn parse_target_aarch64_macos() {
-        let opts = unwrap_options(parse_args_from(&[
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--target",
             "aarch64-macos",
             "source.gruel",
@@ -1390,82 +1970,150 @@ mod tests {
 
     #[test]
     fn parse_target_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--target"])));
+        assert!(is_error(&parse_build_from(&["source.gruel", "--target"])));
     }
 
     #[test]
     fn parse_target_invalid() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "--target",
             "invalid",
             "source.gruel"
         ])));
     }
 
-    // ========== --linker tests ==========
+    // ========== build: --linker ==========
 
     #[test]
     fn parse_linker_internal() {
-        let opts = unwrap_options(parse_args_from(&["--linker", "internal", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--linker", "internal", "source.gruel"]));
         assert_eq!(opts.linker, LinkerMode::Internal);
     }
 
     #[test]
     fn parse_linker_system_clang() {
-        let opts = unwrap_options(parse_args_from(&["--linker", "clang", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--linker", "clang", "source.gruel"]));
         assert_eq!(opts.linker, LinkerMode::System("clang".to_string()));
     }
 
     #[test]
     fn parse_linker_system_gcc() {
-        let opts = unwrap_options(parse_args_from(&["--linker", "gcc", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--linker", "gcc", "source.gruel"]));
         assert_eq!(opts.linker, LinkerMode::System("gcc".to_string()));
     }
 
     #[test]
     fn parse_linker_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--linker"])));
+        assert!(is_error(&parse_build_from(&["source.gruel", "--linker"])));
     }
 
-    // ========== Optimization level tests ==========
+    // ========== build: optimization levels ==========
 
     #[test]
     fn parse_opt_level_0() {
-        let opts = unwrap_options(parse_args_from(&["--opt-level=0", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--opt-level=0", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O0);
     }
 
     #[test]
     fn parse_opt_level_1() {
-        let opts = unwrap_options(parse_args_from(&["--opt-level=1", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--opt-level=1", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O1);
     }
 
     #[test]
     fn parse_opt_level_2() {
-        let opts = unwrap_options(parse_args_from(&["--opt-level=2", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--opt-level=2", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O2);
     }
 
     #[test]
     fn parse_opt_level_3() {
-        let opts = unwrap_options(parse_args_from(&["--opt-level=3", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--opt-level=3", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O3);
     }
 
     #[test]
     fn parse_opt_level_invalid() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "--opt-level=9",
             "source.gruel"
         ])));
     }
 
-    // ========== --preview tests ==========
+    // ========== build: --debug / --release ==========
+
+    #[test]
+    fn parse_debug_flag() {
+        let opts = unwrap_build_opts(parse_build_from(&["--debug", "source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O0);
+    }
+
+    #[test]
+    fn parse_release_flag() {
+        let opts = unwrap_build_opts(parse_build_from(&["--release", "source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O3);
+    }
+
+    #[test]
+    fn parse_debug_release_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--debug",
+            "--release",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_release_debug_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--release",
+            "--debug",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_debug_with_opt_level_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--debug",
+            "--opt-level=2",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_release_with_opt_level_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--release",
+            "--opt-level=1",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_opt_level_then_debug_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--opt-level=2",
+            "--debug",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_opt_level_then_release_conflict() {
+        assert!(is_error(&parse_build_from(&[
+            "--opt-level=1",
+            "--release",
+            "source.gruel"
+        ])));
+    }
+
+    // ========== build: --preview ==========
 
     #[test]
     fn parse_preview_valid_feature() {
-        let opts = unwrap_options(parse_args_from(&[
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--preview",
             "test_infra",
             "source.gruel",
@@ -1475,9 +2123,7 @@ mod tests {
 
     #[test]
     fn parse_preview_multiple_flags() {
-        // Test that --preview can be specified multiple times
-        // (currently only one feature exists, but the flag can still be repeated)
-        let opts = unwrap_options(parse_args_from(&[
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--preview",
             "test_infra",
             "--preview",
@@ -1490,24 +2136,23 @@ mod tests {
 
     #[test]
     fn parse_preview_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--preview"])));
+        assert!(is_error(&parse_build_from(&["source.gruel", "--preview"])));
     }
 
     #[test]
     fn parse_preview_invalid_feature() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "--preview",
             "nonexistent",
             "source.gruel"
         ])));
     }
 
-    // ========== --cache-dir / --no-cache tests (ADR-0074) ==========
+    // ========== build: --cache-dir / --no-cache ==========
 
     #[test]
-    fn cache_dir_accepted_without_preview() {
-        // After stabilization, --cache-dir works without any preview gate.
-        let opts = unwrap_options(parse_args_from(&[
+    fn cache_dir_accepted() {
+        let opts = unwrap_build_opts(parse_build_from(&[
             "--cache-dir",
             "/tmp/foo",
             "source.gruel",
@@ -1518,113 +2163,577 @@ mod tests {
 
     #[test]
     fn cache_dir_default_when_omitted() {
-        // No --cache-dir, no --no-cache: cache_dir is None at parse time
-        // (the driver fills in the workspace-relative default later).
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel"]));
         assert!(opts.cache_dir.is_none());
         assert!(!opts.no_cache);
     }
 
     #[test]
     fn no_cache_flag_sets_field() {
-        let opts = unwrap_options(parse_args_from(&["--no-cache", "source.gruel"]));
+        let opts = unwrap_build_opts(parse_build_from(&["--no-cache", "source.gruel"]));
         assert!(opts.no_cache);
     }
 
+    // ========== build: --time-passes / --benchmark-json ==========
+
     #[test]
-    fn no_cache_conflicts_with_cache_stats() {
-        assert!(is_error(&parse_args_from(&[
-            "--no-cache",
-            "--cache-stats",
+    fn parse_time_passes() {
+        let opts = unwrap_build_opts(parse_build_from(&["--time-passes", "source.gruel"]));
+        assert!(opts.time_passes);
+    }
+
+    #[test]
+    fn parse_time_passes_with_other_options() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "--time-passes",
+            "--opt-level=2",
+            "--target",
+            "x86_64-linux",
             "source.gruel",
+        ]));
+        assert!(opts.time_passes);
+        assert_eq!(opts.opt_level, OptLevel::O2);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+    }
+
+    #[test]
+    fn parse_benchmark_json() {
+        let opts = unwrap_build_opts(parse_build_from(&["--benchmark-json", "source.gruel"]));
+        assert!(opts.benchmark_json);
+    }
+
+    #[test]
+    fn parse_benchmark_json_with_other_options() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "--benchmark-json",
+            "--opt-level=2",
+            "--target",
+            "x86_64-linux",
+            "source.gruel",
+        ]));
+        assert!(opts.benchmark_json);
+        assert_eq!(opts.opt_level, OptLevel::O2);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+    }
+
+    #[test]
+    fn parse_both_time_passes_and_benchmark_json() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "--time-passes",
+            "--benchmark-json",
+            "source.gruel",
+        ]));
+        assert!(opts.time_passes);
+        assert!(opts.benchmark_json);
+    }
+
+    // ========== build: --jobs ==========
+
+    #[test]
+    fn parse_jobs_long_form() {
+        let opts = unwrap_build_opts(parse_build_from(&["--jobs", "4", "source.gruel"]));
+        assert_eq!(opts.jobs, 4);
+    }
+
+    #[test]
+    fn parse_jobs_short_form() {
+        let opts = unwrap_build_opts(parse_build_from(&["-j", "4", "source.gruel"]));
+        assert_eq!(opts.jobs, 4);
+    }
+
+    #[test]
+    fn parse_jobs_attached_form() {
+        let opts = unwrap_build_opts(parse_build_from(&["-j4", "source.gruel"]));
+        assert_eq!(opts.jobs, 4);
+    }
+
+    #[test]
+    fn parse_jobs_single_thread() {
+        let opts = unwrap_build_opts(parse_build_from(&["-j1", "source.gruel"]));
+        assert_eq!(opts.jobs, 1);
+    }
+
+    #[test]
+    fn parse_jobs_auto_detect() {
+        let opts = unwrap_build_opts(parse_build_from(&["--jobs", "0", "source.gruel"]));
+        assert_eq!(opts.jobs, 0);
+    }
+
+    #[test]
+    fn parse_jobs_missing_value() {
+        assert!(is_error(&parse_build_from(&["source.gruel", "--jobs"])));
+    }
+
+    #[test]
+    fn parse_jobs_missing_value_short() {
+        assert!(is_error(&parse_build_from(&["source.gruel", "-j"])));
+    }
+
+    #[test]
+    fn parse_jobs_invalid_value() {
+        assert!(is_error(&parse_build_from(&[
+            "--jobs",
+            "abc",
+            "source.gruel"
         ])));
     }
 
     #[test]
-    fn cache_stats_defaults_cache_dir() {
-        // --cache-stats works without --cache-dir; the driver falls back
-        // to ./target/gruel-cache/ relative to CWD.
-        let opts = unwrap_options(parse_args_from(&["--cache-stats"]));
-        assert!(opts.cache_stats);
-        assert_eq!(opts.cache_dir.as_deref(), Some("target/gruel-cache"));
+    fn parse_jobs_negative_value() {
+        assert!(is_error(&parse_build_from(&[
+            "--jobs",
+            "-1",
+            "source.gruel"
+        ])));
     }
 
     #[test]
-    fn cache_clean_defaults_cache_dir() {
-        let opts = unwrap_options(parse_args_from(&["--cache-clean"]));
-        assert!(opts.cache_clean);
-        assert_eq!(opts.cache_dir.as_deref(), Some("target/gruel-cache"));
+    fn parse_jobs_with_other_options() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "-j4",
+            "--opt-level=2",
+            "--target",
+            "x86_64-linux",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.jobs, 4);
+        assert_eq!(opts.opt_level, OptLevel::O2);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
-    // ========== --log-level tests ==========
+    // ========== build: option order ==========
+
+    #[test]
+    fn parse_all_options_combined() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "--target",
+            "x86_64-linux",
+            "--linker",
+            "clang",
+            "--opt-level=2",
+            "source.gruel",
+            "output",
+        ]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert_eq!(opts.output_path, "output");
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+        assert_eq!(opts.linker, LinkerMode::System("clang".to_string()));
+        assert_eq!(opts.opt_level, OptLevel::O2);
+    }
+
+    #[test]
+    fn parse_options_after_source() {
+        let opts = unwrap_build_opts(parse_build_from(&["source.gruel", "--opt-level=1"]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert_eq!(opts.opt_level, OptLevel::O1);
+    }
+
+    #[test]
+    fn parse_mixed_option_positions() {
+        let opts = unwrap_build_opts(parse_build_from(&[
+            "--opt-level=1",
+            "source.gruel",
+            "--target",
+            "x86_64-linux",
+            "output",
+        ]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert_eq!(opts.output_path, "output");
+        assert_eq!(opts.opt_level, OptLevel::O1);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+    }
+
+    // ========== gruel emit ==========
+
+    #[test]
+    fn parse_emit_tokens() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["tokens", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Tokens]);
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+    }
+
+    #[test]
+    fn parse_emit_ast() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["ast", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Ast]);
+    }
+
+    #[test]
+    fn parse_emit_rir() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["rir", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Rir]);
+    }
+
+    #[test]
+    fn parse_emit_air() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["air", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Air]);
+    }
+
+    #[test]
+    fn parse_emit_cfg() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["cfg", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Cfg]);
+    }
+
+    #[test]
+    fn parse_emit_asm() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["asm", "source.gruel"]));
+        assert_eq!(opts.stages, vec![EmitStage::Asm]);
+    }
+
+    #[test]
+    fn parse_emit_multiple_stages_comma() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["tokens,ast,air", "source.gruel"]));
+        assert_eq!(
+            opts.stages,
+            vec![EmitStage::Tokens, EmitStage::Ast, EmitStage::Air]
+        );
+    }
+
+    #[test]
+    fn parse_emit_missing_value() {
+        assert!(is_error(&parse_emit_from(&[])));
+    }
+
+    #[test]
+    fn parse_emit_invalid_stage() {
+        assert!(is_error(&parse_emit_from(&["invalid", "source.gruel"])));
+    }
+
+    #[test]
+    fn parse_emit_missing_source() {
+        assert!(is_error(&parse_emit_from(&["air"])));
+    }
+
+    #[test]
+    fn parse_emit_multi_file() {
+        let opts = unwrap_emit_opts(parse_emit_from(&["air", "a.gruel", "b.gruel"]));
+        assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
+        assert_eq!(opts.stages, vec![EmitStage::Air]);
+    }
+
+    #[test]
+    fn parse_emit_with_target_and_opt() {
+        let opts = unwrap_emit_opts(parse_emit_from(&[
+            "asm",
+            "--target",
+            "x86_64-linux",
+            "--opt-level=2",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.stages, vec![EmitStage::Asm]);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+        assert_eq!(opts.opt_level, OptLevel::O2);
+    }
+
+    // ========== gruel doc ==========
+
+    #[test]
+    fn parse_doc_defaults() {
+        let opts = unwrap_doc_opts(parse_doc_from(&["source.gruel"]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert_eq!(opts.format, DocFormat::Markdown);
+        assert_eq!(opts.output_dir, "target/doc");
+    }
+
+    #[test]
+    fn parse_doc_html() {
+        let opts = unwrap_doc_opts(parse_doc_from(&["--format", "html", "source.gruel"]));
+        assert_eq!(opts.format, DocFormat::Html);
+    }
+
+    #[test]
+    fn parse_doc_output_dir() {
+        let opts = unwrap_doc_opts(parse_doc_from(&[
+            "--output-dir",
+            "out/docs",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.output_dir, "out/docs");
+    }
+
+    #[test]
+    fn parse_doc_multi_file() {
+        let opts = unwrap_doc_opts(parse_doc_from(&["a.gruel", "b.gruel"]));
+        assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
+    }
+
+    #[test]
+    fn parse_doc_no_sources_is_error() {
+        assert!(is_error(&parse_doc_from(&[])));
+    }
+
+    #[test]
+    fn parse_doc_invalid_format() {
+        assert!(is_error(&parse_doc_from(&[
+            "--format",
+            "pdf",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_doc_preview() {
+        let opts = unwrap_doc_opts(parse_doc_from(&["--preview", "test_infra", "source.gruel"]));
+        assert!(opts.preview_features.contains(&PreviewFeature::TestInfra));
+    }
+
+    // ========== gruel cache ==========
+
+    #[test]
+    fn parse_cache_stats_defaults() {
+        let opts = unwrap_cache_opts(parse_cache_from(&["stats"]));
+        match opts {
+            CacheOpts::Stats { cache_dir } => assert_eq!(cache_dir, "target/gruel-cache"),
+            _ => panic!("expected Stats"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_clean_defaults() {
+        let opts = unwrap_cache_opts(parse_cache_from(&["clean"]));
+        match opts {
+            CacheOpts::Clean { cache_dir } => assert_eq!(cache_dir, "target/gruel-cache"),
+            _ => panic!("expected Clean"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_stats_with_dir() {
+        let opts = unwrap_cache_opts(parse_cache_from(&["stats", "--cache-dir", "/tmp/foo"]));
+        match opts {
+            CacheOpts::Stats { cache_dir } => assert_eq!(cache_dir, "/tmp/foo"),
+            _ => panic!("expected Stats"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_clean_with_dir() {
+        let opts = unwrap_cache_opts(parse_cache_from(&["clean", "--cache-dir", "/tmp/foo"]));
+        match opts {
+            CacheOpts::Clean { cache_dir } => assert_eq!(cache_dir, "/tmp/foo"),
+            _ => panic!("expected Clean"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_requires_action() {
+        assert!(is_error(&parse_cache_from(&[])));
+    }
+
+    #[test]
+    fn parse_cache_unknown_action() {
+        assert!(is_error(&parse_cache_from(&["nuke"])));
+    }
+
+    // ========== gruel run ==========
+
+    #[test]
+    fn parse_run_single_source() {
+        let opts = unwrap_run_opts(parse_run_from(&["source.gruel"]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert!(opts.program_args.is_empty());
+    }
+
+    #[test]
+    fn parse_run_multi_source() {
+        let opts = unwrap_run_opts(parse_run_from(&["a.gruel", "b.gruel"]));
+        assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
+        assert!(opts.program_args.is_empty());
+    }
+
+    #[test]
+    fn parse_run_forwards_program_args() {
+        let opts = unwrap_run_opts(parse_run_from(&[
+            "source.gruel",
+            "--",
+            "foo",
+            "--bar",
+            "baz",
+        ]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+        assert_eq!(opts.program_args, vec!["foo", "--bar", "baz"]);
+    }
+
+    #[test]
+    fn parse_run_no_sources_is_error() {
+        assert!(is_error(&parse_run_from(&[])));
+    }
+
+    #[test]
+    fn parse_run_release_flag() {
+        let opts = unwrap_run_opts(parse_run_from(&["--release", "source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O3);
+    }
+
+    #[test]
+    fn parse_run_with_target_and_preview() {
+        let opts = unwrap_run_opts(parse_run_from(&[
+            "--target",
+            "x86_64-linux",
+            "--preview",
+            "test_infra",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+        assert!(opts.preview_features.contains(&PreviewFeature::TestInfra));
+    }
+
+    #[test]
+    fn parse_run_no_cache_flag() {
+        let opts = unwrap_run_opts(parse_run_from(&["--no-cache", "source.gruel"]));
+        assert!(opts.no_cache);
+    }
+
+    #[test]
+    fn parse_run_args_no_separator_treated_as_sources() {
+        // Without `--`, positionals are all source files.
+        let opts = unwrap_run_opts(parse_run_from(&["a.gruel", "b.gruel", "c.gruel"]));
+        assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel", "c.gruel"]);
+        assert!(opts.program_args.is_empty());
+    }
+
+    // ========== gruel check ==========
+
+    #[test]
+    fn parse_check_single_source() {
+        let opts = unwrap_check_opts(parse_check_from(&["source.gruel"]));
+        assert_eq!(opts.source_paths, vec!["source.gruel"]);
+    }
+
+    #[test]
+    fn parse_check_multi_source() {
+        let opts = unwrap_check_opts(parse_check_from(&["a.gruel", "b.gruel"]));
+        assert_eq!(opts.source_paths, vec!["a.gruel", "b.gruel"]);
+    }
+
+    #[test]
+    fn parse_check_no_sources_is_error() {
+        assert!(is_error(&parse_check_from(&[])));
+    }
+
+    #[test]
+    fn parse_check_with_target() {
+        let opts = unwrap_check_opts(parse_check_from(&[
+            "--target",
+            "x86_64-linux",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
+    }
+
+    #[test]
+    fn parse_check_preview() {
+        let opts = unwrap_check_opts(parse_check_from(&[
+            "--preview",
+            "test_infra",
+            "source.gruel",
+        ]));
+        assert!(opts.preview_features.contains(&PreviewFeature::TestInfra));
+    }
+
+    #[test]
+    fn parse_check_time_passes() {
+        let opts = unwrap_check_opts(parse_check_from(&["--time-passes", "source.gruel"]));
+        assert!(opts.time_passes);
+    }
+
+    #[test]
+    fn parse_check_benchmark_json() {
+        let opts = unwrap_check_opts(parse_check_from(&["--benchmark-json", "source.gruel"]));
+        assert!(opts.benchmark_json);
+    }
+
+    // ========== globals ==========
 
     #[test]
     fn parse_log_level_off() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "off", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Off);
+        let (globals, _) = unwrap_build(parse_build_from(&["--log-level", "off", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Off);
     }
 
     #[test]
     fn parse_log_level_error() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "error", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Error);
+        let (globals, _) =
+            unwrap_build(parse_build_from(&["--log-level", "error", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Error);
     }
 
     #[test]
     fn parse_log_level_warn() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "warn", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Warn);
+        let (globals, _) = unwrap_build(parse_build_from(&["--log-level", "warn", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Warn);
     }
 
     #[test]
     fn parse_log_level_info() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "info", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Info);
+        let (globals, _) = unwrap_build(parse_build_from(&["--log-level", "info", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Info);
     }
 
     #[test]
     fn parse_log_level_debug() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "debug", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Debug);
+        let (globals, _) =
+            unwrap_build(parse_build_from(&["--log-level", "debug", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Debug);
     }
 
     #[test]
     fn parse_log_level_trace() {
-        let opts = unwrap_options(parse_args_from(&["--log-level", "trace", "source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Trace);
+        let (globals, _) =
+            unwrap_build(parse_build_from(&["--log-level", "trace", "source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Trace);
+    }
+
+    #[test]
+    fn parse_log_level_global_before_subcommand() {
+        // Globals can appear before the subcommand too.
+        let result = parse_args_from(&["--log-level", "info", "build", "source.gruel"]);
+        let (globals, _) = match result {
+            ParseResult::Ok(ParsedCli {
+                globals,
+                command: ResolvedCommand::Build(opts),
+            }) => (globals, opts),
+            _ => panic!("expected Build with global log-level"),
+        };
+        assert_eq!(globals.log_level, LogLevel::Info);
     }
 
     #[test]
     fn parse_log_level_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--log-level"])));
+        assert!(is_error(&parse_build_from(&[
+            "source.gruel",
+            "--log-level"
+        ])));
     }
 
     #[test]
     fn parse_log_level_invalid() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "--log-level",
             "invalid",
             "source.gruel"
         ])));
     }
 
-    // ========== --log-format tests ==========
-
     #[test]
     fn parse_log_format_text() {
-        let opts = unwrap_options(parse_args_from(&["--log-format", "text", "source.gruel"]));
-        assert_eq!(opts.log_format, LogFormat::Text);
+        let (globals, _) =
+            unwrap_build(parse_build_from(&["--log-format", "text", "source.gruel"]));
+        assert_eq!(globals.log_format, LogFormat::Text);
     }
 
     #[test]
     fn parse_log_format_json() {
-        let opts = unwrap_options(parse_args_from(&["--log-format", "json", "source.gruel"]));
-        assert_eq!(opts.log_format, LogFormat::Json);
+        let (globals, _) =
+            unwrap_build(parse_build_from(&["--log-format", "json", "source.gruel"]));
+        assert_eq!(globals.log_format, LogFormat::Json);
     }
 
     #[test]
     fn parse_log_format_missing_value() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "source.gruel",
             "--log-format"
         ])));
@@ -1632,14 +2741,26 @@ mod tests {
 
     #[test]
     fn parse_log_format_invalid() {
-        assert!(is_error(&parse_args_from(&[
+        assert!(is_error(&parse_build_from(&[
             "--log-format",
             "invalid",
             "source.gruel"
         ])));
     }
 
-    // ========== --help and --version tests ==========
+    #[test]
+    fn parse_defaults_log_level() {
+        let (globals, _) = unwrap_build(parse_build_from(&["source.gruel"]));
+        assert_eq!(globals.log_level, LogLevel::Off);
+    }
+
+    #[test]
+    fn parse_defaults_log_format() {
+        let (globals, _) = unwrap_build(parse_build_from(&["source.gruel"]));
+        assert_eq!(globals.log_format, LogFormat::Text);
+    }
+
+    // ========== --help and --version ==========
 
     #[test]
     fn parse_help_long() {
@@ -1661,316 +2782,20 @@ mod tests {
         assert!(is_exit(&parse_args_from(&["-V"])));
     }
 
-    // ========== Unknown option tests ==========
+    #[test]
+    fn parse_build_help() {
+        assert!(is_exit(&parse_build_from(&["--help"])));
+    }
+
+    // ========== unknown options ==========
 
     #[test]
     fn parse_unknown_option() {
-        assert!(is_error(&parse_args_from(&["--unknown", "source.gruel"])));
+        assert!(is_error(&parse_build_from(&["--unknown", "source.gruel"])));
     }
 
     #[test]
     fn parse_unknown_short_option() {
-        assert!(is_error(&parse_args_from(&["-x", "source.gruel"])));
-    }
-
-    // ========== Combined options tests ==========
-
-    #[test]
-    fn parse_all_options_combined() {
-        let opts = unwrap_options(parse_args_from(&[
-            "--target",
-            "x86_64-linux",
-            "--linker",
-            "clang",
-            "--opt-level=2",
-            "--emit",
-            "air",
-            "source.gruel",
-            "output",
-        ]));
-        assert_eq!(opts.source_paths, vec!["source.gruel"]);
-        assert_eq!(opts.output_path, "output");
-        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
-        assert_eq!(opts.linker, LinkerMode::System("clang".to_string()));
-        assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.emit_stages, vec![EmitStage::Air]);
-    }
-
-    #[test]
-    fn parse_options_after_source() {
-        // Options can appear after the source file
-        let opts = unwrap_options(parse_args_from(&["source.gruel", "--opt-level=1"]));
-        assert_eq!(opts.source_paths, vec!["source.gruel"]);
-        assert_eq!(opts.opt_level, OptLevel::O1);
-    }
-
-    #[test]
-    fn parse_mixed_option_positions() {
-        let opts = unwrap_options(parse_args_from(&[
-            "--opt-level=1",
-            "source.gruel",
-            "--target",
-            "x86_64-linux",
-            "output",
-        ]));
-        assert_eq!(opts.source_paths, vec!["source.gruel"]);
-        assert_eq!(opts.output_path, "output");
-        assert_eq!(opts.opt_level, OptLevel::O1);
-        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
-    }
-
-    // ========== Default values tests ==========
-
-    #[test]
-    fn parse_defaults_output_path() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.output_path, "a.out");
-    }
-
-    #[test]
-    fn parse_defaults_opt_level() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.opt_level, OptLevel::O0);
-    }
-
-    #[test]
-    fn parse_defaults_linker() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.linker, LinkerMode::Internal);
-    }
-
-    #[test]
-    fn parse_defaults_emit_stages_empty() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert!(opts.emit_stages.is_empty());
-    }
-
-    #[test]
-    fn parse_defaults_log_level() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.log_level, LogLevel::Off);
-    }
-
-    #[test]
-    fn parse_defaults_log_format() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.log_format, LogFormat::Text);
-    }
-
-    #[test]
-    fn parse_defaults_time_passes() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert!(!opts.time_passes);
-    }
-
-    // ========== --time-passes tests ==========
-
-    #[test]
-    fn parse_time_passes() {
-        let opts = unwrap_options(parse_args_from(&["--time-passes", "source.gruel"]));
-        assert!(opts.time_passes);
-    }
-
-    #[test]
-    fn parse_time_passes_with_other_options() {
-        let opts = unwrap_options(parse_args_from(&[
-            "--time-passes",
-            "--opt-level=2",
-            "--target",
-            "x86_64-linux",
-            "source.gruel",
-        ]));
-        assert!(opts.time_passes);
-        assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
-    }
-
-    // ========== --benchmark-json tests ==========
-
-    #[test]
-    fn parse_benchmark_json() {
-        let opts = unwrap_options(parse_args_from(&["--benchmark-json", "source.gruel"]));
-        assert!(opts.benchmark_json);
-    }
-
-    #[test]
-    fn parse_benchmark_json_with_other_options() {
-        let opts = unwrap_options(parse_args_from(&[
-            "--benchmark-json",
-            "--opt-level=2",
-            "--target",
-            "x86_64-linux",
-            "source.gruel",
-        ]));
-        assert!(opts.benchmark_json);
-        assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
-    }
-
-    #[test]
-    fn parse_defaults_benchmark_json() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert!(!opts.benchmark_json);
-    }
-
-    #[test]
-    fn parse_both_time_passes_and_benchmark_json() {
-        // When both are specified, benchmark_json takes precedence (JSON output)
-        let opts = unwrap_options(parse_args_from(&[
-            "--time-passes",
-            "--benchmark-json",
-            "source.gruel",
-        ]));
-        assert!(opts.time_passes);
-        assert!(opts.benchmark_json);
-    }
-
-    // ========== --jobs tests ==========
-
-    #[test]
-    fn parse_jobs_long_form() {
-        let opts = unwrap_options(parse_args_from(&["--jobs", "4", "source.gruel"]));
-        assert_eq!(opts.jobs, 4);
-    }
-
-    #[test]
-    fn parse_jobs_short_form() {
-        let opts = unwrap_options(parse_args_from(&["-j", "4", "source.gruel"]));
-        assert_eq!(opts.jobs, 4);
-    }
-
-    #[test]
-    fn parse_jobs_attached_form() {
-        let opts = unwrap_options(parse_args_from(&["-j4", "source.gruel"]));
-        assert_eq!(opts.jobs, 4);
-    }
-
-    #[test]
-    fn parse_jobs_single_thread() {
-        let opts = unwrap_options(parse_args_from(&["-j1", "source.gruel"]));
-        assert_eq!(opts.jobs, 1);
-    }
-
-    #[test]
-    fn parse_jobs_auto_detect() {
-        let opts = unwrap_options(parse_args_from(&["--jobs", "0", "source.gruel"]));
-        assert_eq!(opts.jobs, 0);
-    }
-
-    #[test]
-    fn parse_jobs_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--jobs"])));
-    }
-
-    #[test]
-    fn parse_jobs_missing_value_short() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "-j"])));
-    }
-
-    #[test]
-    fn parse_jobs_invalid_value() {
-        assert!(is_error(&parse_args_from(&[
-            "--jobs",
-            "abc",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_jobs_negative_value() {
-        // Negative values should fail to parse as usize
-        assert!(is_error(&parse_args_from(&[
-            "--jobs",
-            "-1",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_jobs_with_other_options() {
-        let opts = unwrap_options(parse_args_from(&[
-            "-j4",
-            "--opt-level=2",
-            "--target",
-            "x86_64-linux",
-            "source.gruel",
-        ]));
-        assert_eq!(opts.jobs, 4);
-        assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
-    }
-
-    #[test]
-    fn parse_defaults_jobs() {
-        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
-        assert_eq!(opts.jobs, 0);
-    }
-
-    // ========== --debug / --release tests ==========
-
-    #[test]
-    fn parse_debug_flag() {
-        let opts = unwrap_options(parse_args_from(&["--debug", "source.gruel"]));
-        assert_eq!(opts.opt_level, OptLevel::O0);
-    }
-
-    #[test]
-    fn parse_release_flag() {
-        let opts = unwrap_options(parse_args_from(&["--release", "source.gruel"]));
-        assert_eq!(opts.opt_level, OptLevel::O3);
-    }
-
-    #[test]
-    fn parse_debug_release_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--debug",
-            "--release",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_release_debug_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--release",
-            "--debug",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_debug_with_opt_level_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--debug",
-            "--opt-level=2",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_release_with_opt_level_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--release",
-            "--opt-level=1",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_opt_level_then_debug_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--opt-level=2",
-            "--debug",
-            "source.gruel"
-        ])));
-    }
-
-    #[test]
-    fn parse_opt_level_then_release_conflict() {
-        assert!(is_error(&parse_args_from(&[
-            "--opt-level=1",
-            "--release",
-            "source.gruel"
-        ])));
+        assert!(is_error(&parse_build_from(&["-x", "source.gruel"])));
     }
 }
