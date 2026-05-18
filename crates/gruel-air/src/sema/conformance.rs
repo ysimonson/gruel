@@ -338,13 +338,15 @@ impl<'a> Sema<'a> {
     ) -> CompileError {
         let iface_def = &self.interface_defs[interface_id.0 as usize];
         CompileError::new(
-            ErrorKind::InterfaceMethodUncheckedMismatch {
-                type_name: self.format_type_name(candidate),
-                interface_name: iface_def.name.clone(),
-                method_name: req.name.clone(),
-                expected_unchecked: req.is_unchecked,
-                actual_unchecked,
-            },
+            ErrorKind::InterfaceMethodUncheckedMismatch(Box::new(
+                gruel_util::error::InterfaceMethodUncheckedMismatchError {
+                    type_name: self.format_type_name(candidate),
+                    interface_name: iface_def.name.clone(),
+                    method_name: req.name.clone(),
+                    expected_unchecked: req.is_unchecked,
+                    actual_unchecked,
+                },
+            )),
             span,
         )
     }

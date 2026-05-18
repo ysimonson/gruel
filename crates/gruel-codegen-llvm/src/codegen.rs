@@ -3503,6 +3503,14 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                             });
                             self.builder.build_call(f, &[slot.into()], "").unwrap();
                         }
+                        // Sema's @dbg arm intentionally lets Error/Never
+                        // propagate (see gruel-air/src/sema/intrinsics.rs).
+                        // If one reaches codegen, the function is already
+                        // dead w.r.t. correctness — drop the print rather
+                        // than ICE'ing. Real bugs surface as the original
+                        // sema diagnostic; the fuzz that found this was
+                        // exercising a missing arm, not a missing error.
+                        TypeKind::Error | TypeKind::Never => {}
                         _ => {
                             unreachable!("@dbg: unsupported type {:?}", arg_ty.kind());
                         }

@@ -244,7 +244,7 @@ for i in "${!benchmark_names[@]}"; do
         time_output="$TEMP_DIR/time_output_$$"
         if [[ "$os" == "darwin" ]]; then
             # macOS: -l gives max resident set size in bytes
-            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" build --benchmark-json "$opt_flag" "$full_path" -o "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 log_warn "  --- gruel stderr ---"
                 sed 's/^/  /' "$time_output" >&2 || true
@@ -256,7 +256,7 @@ for i in "${!benchmark_names[@]}"; do
             peak_mem_bytes=$(grep "maximum resident set size" "$time_output" 2>/dev/null | awk '{print $1}')
         else
             # Linux: -v gives max resident set size in KB
-            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" build --benchmark-json "$opt_flag" "$full_path" -o "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 log_warn "  --- gruel stderr ---"
                 sed 's/^/  /' "$time_output" >&2 || true

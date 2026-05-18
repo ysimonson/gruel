@@ -225,7 +225,7 @@ fn main() -> i32 {
 
 {{ rule(id="2.5:31", cat="informative") }}
 
-See [Move Semantics](@/03-types/08-move-semantics.md#the-copy-keyword)
+See [Move Semantics](@/03-types/08-move-semantics.md#copy-types-and-multiple-uses)
 for the full semantics of `copy` types.
 
 ## Unrecognized Directives

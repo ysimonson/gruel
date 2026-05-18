@@ -101,7 +101,10 @@ jobs:
         run: rustup toolchain install nightly
 
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --locked
+        # No `--locked`: cargo-fuzz on nightly has bundled lockfile
+        # mismatches that pin it to old rustc internals; matches
+        # `fuzz.yml`, which has been installing it cleanly without.
+        run: cargo +nightly install cargo-fuzz
 
       - name: Restore fuzz corpus
         uses: actions/cache/restore@v4

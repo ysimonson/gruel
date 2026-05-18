@@ -958,10 +958,47 @@ impl<'src> CompilationUnit<'src> {
     /// Run all phases and produce a compiled binary.
     ///
     /// This is a convenience method that runs the complete compilation pipeline.
-    /// Equivalent to calling `run_frontend()` followed by `compile()`.
+    /// Equivalent to calling `run_frontend()` followed by `compile()`, with an
+    /// early `NoMainFunction` check after parsing so we surface the missing-main
+    /// error directly instead of letting sema's "analyze every top-level fn"
+    /// fallback churn through the prelude and report something unrelated first.
     pub fn run_all(&mut self) -> MultiErrorResult<CompileOutput> {
-        self.run_frontend()?;
+        self.parse()?;
+        self.require_user_main()?;
+        self.lower()?;
+        self.analyze()?;
         self.compile()
+    }
+
+    /// Bail out with `NoMainFunction` if the merged AST has no `fn main` in any
+    /// user source file. Prelude files get auto-assigned `FileId`s during
+    /// `parse()` that don't appear in `self.sources`; restricting the search to
+    /// user-provided file IDs keeps the helper robust even if a future prelude
+    /// module ever defined an internal `main` helper.
+    fn require_user_main(&self) -> MultiErrorResult<()> {
+        use gruel_parser::ast::Item;
+        let ast = self
+            .merged_ast
+            .as_ref()
+            .expect("require_user_main called before parse()");
+        let interner = self.interner.as_ref().expect("interner not initialized");
+        let user_file_ids: rustc_hash::FxHashSet<u32> =
+            self.sources.iter().map(|s| s.file_id.index()).collect();
+        let has_user_main = ast.items.iter().any(|item| {
+            let Item::Function(f) = item else {
+                return false;
+            };
+            if !user_file_ids.contains(&f.name.span.file_id.index()) {
+                return false;
+            }
+            interner.resolve(&f.name.name) == "main"
+        });
+        if !has_user_main {
+            return Err(CompileErrors::from(CompileError::without_span(
+                ErrorKind::NoMainFunction,
+            )));
+        }
+        Ok(())
     }
 
     /// Check if parsing has been completed.

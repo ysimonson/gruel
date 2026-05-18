@@ -5259,8 +5259,21 @@ impl<'a> Sema<'a> {
         if let Some(const_value) = ctx.comptime_value_vars.get(&name) {
             match const_value {
                 ConstValue::Integer(val) => {
-                    let ty =
+                    // Inference parks `comptime_unroll for idx in …` bindings on a fresh type
+                    // variable since the iterable's element type isn't known until sema
+                    // evaluates the comptime block. If the body uses the binding in a position
+                    // that doesn't add a type constraint (e.g. `@dbg(idx)`), unification
+                    // leaves the variable unbound and `get_resolved_type` returns
+                    // `Type::ERROR`, which then ICEs in @dbg codegen. Fall back to `i32` for
+                    // unbound integer comptime values — it's the default integer type and
+                    // matches what `@range`-style iterables produce.
+                    let resolved =
                         Self::get_resolved_type(ctx, inst_ref, span, "comptime integer value")?;
+                    let ty = if resolved.is_error() {
+                        Type::I32
+                    } else {
+                        resolved
+                    };
                     let air_ref = air.add_inst(AirInst {
                         data: AirInstData::Const(*val as u64),
                         ty,

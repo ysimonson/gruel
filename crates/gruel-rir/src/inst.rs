@@ -1570,12 +1570,22 @@ impl Rir {
     }
 
     /// Store destructure fields and return (start, field_count).
+    ///
+    /// `binding_name` is `Option<Spur>`. `None` encodes as `u32::MAX` —
+    /// using `0` as the sentinel was wrong because `Spur::into_usize` is
+    /// 0-indexed (the first-interned Spur lives at index 0), so the very
+    /// first name interned in the build would round-trip back as `None`
+    /// and lose its binding. `u32::MAX` matches the encoding already used
+    /// by `encode_binding` / `decode_binding` above.
     pub fn add_destructure_fields(&mut self, fields: &[RirDestructureField]) -> (u32, u32) {
         let start = self.extra.len() as u32;
         for field in fields {
             self.extra.push(field.field_name.into_usize() as u32);
-            self.extra
-                .push(field.binding_name.map_or(0, |s| s.into_usize() as u32));
+            self.extra.push(
+                field
+                    .binding_name
+                    .map_or(u32::MAX, |s| s.into_usize() as u32),
+            );
             self.extra.push(field.is_wildcard as u32);
             self.extra.push(field.is_mut as u32);
         }
@@ -1589,7 +1599,7 @@ impl Rir {
             let pos = (start + i * DESTRUCTURE_FIELD_SIZE) as usize;
             let field_name = Spur::try_from_usize(self.extra[pos] as usize).unwrap();
             let binding_raw = self.extra[pos + 1];
-            let binding_name = if binding_raw == 0 {
+            let binding_name = if binding_raw == u32::MAX {
                 None
             } else {
                 Some(Spur::try_from_usize(binding_raw as usize).unwrap())

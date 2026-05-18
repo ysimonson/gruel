@@ -330,6 +330,19 @@ pub struct FieldWrongOrderError {
     pub found_field: String,
 }
 
+/// Payload for `ErrorKind::InterfaceMethodUncheckedMismatch` (ADR-0088).
+///
+/// Three strings plus two bools push the inline variant over the
+/// 64-byte `ErrorKind` budget, so the body is boxed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceMethodUncheckedMismatchError {
+    pub type_name: String,
+    pub interface_name: String,
+    pub method_name: String,
+    pub expected_unchecked: bool,
+    pub actual_unchecked: bool,
+}
+
 // ============================================================================
 // Preview Features
 // ============================================================================
@@ -1180,16 +1193,13 @@ pub enum ErrorKind {
     /// `@mark(unchecked)` impl, and vice versa.
     #[error(
         "method `{method_name}` on type `{type_name}` does not conform to interface `{interface_name}`: interface declares it as {} but implementor declares it as {}",
-        if *expected_unchecked { "`@mark(unchecked)`" } else { "checked" },
-        if *actual_unchecked { "`@mark(unchecked)`" } else { "checked" },
+        if .0.expected_unchecked { "`@mark(unchecked)`" } else { "checked" },
+        if .0.actual_unchecked { "`@mark(unchecked)`" } else { "checked" },
+        method_name = .0.method_name,
+        type_name = .0.type_name,
+        interface_name = .0.interface_name,
     )]
-    InterfaceMethodUncheckedMismatch {
-        type_name: String,
-        interface_name: String,
-        method_name: String,
-        expected_unchecked: bool,
-        actual_unchecked: bool,
-    },
+    InterfaceMethodUncheckedMismatch(Box<InterfaceMethodUncheckedMismatchError>),
 
     // Match errors
     //
@@ -1419,7 +1429,7 @@ impl ErrorKind {
             }
             ErrorKind::UncheckedDestructor => ErrorCode::UNCHECKED_DESTRUCTOR,
             ErrorKind::ExternFnMissingUnchecked { .. } => ErrorCode::EXTERN_FN_MISSING_UNCHECKED,
-            ErrorKind::InterfaceMethodUncheckedMismatch { .. } => {
+            ErrorKind::InterfaceMethodUncheckedMismatch(_) => {
                 ErrorCode::INTERFACE_METHOD_UNCHECKED_MISMATCH
             }
 

@@ -1596,12 +1596,10 @@ mod tests {
             "parts_to_vec",
             // ADR-0072
             "cstr_to_vec",
-            // ADR-0082: memory intrinsics gated to checked blocks.
-            "alloc",
-            "realloc",
-            "free",
+            // ADR-0082: memory intrinsics gated to checked blocks. The
+            // alloc/realloc/free/bytes_eq names retired in ADR-0087
+            // (migrated into prelude wrappers); only `ptr_cast` remains.
             "ptr_cast",
-            "bytes_eq",
             // ADR-0084: prelude-internal join wrapper.
             "thread_join",
         ]
