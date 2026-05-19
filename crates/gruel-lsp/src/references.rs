@@ -76,10 +76,7 @@ enum Scope<'a> {
 fn enclosing_function(ast: &Ast, def: Span) -> Option<&Function> {
     for item in &ast.items {
         if let Item::Function(f) = item {
-            if def.file_id == f.span.file_id
-                && def.start >= f.span.start
-                && def.end <= f.span.end
-            {
+            if def.file_id == f.span.file_id && def.start >= f.span.start && def.end <= f.span.end {
                 return Some(f);
             }
         }
@@ -663,7 +660,9 @@ impl IdentFinder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];

@@ -29,8 +29,14 @@ fn synth_diag(start: u32, end: u32, applicability: &str) -> Diagnostic {
     };
     Diagnostic {
         range: Range {
-            start: Position { line: 0, character: start },
-            end: Position { line: 0, character: end },
+            start: Position {
+                line: 0,
+                character: start,
+            },
+            end: Position {
+                line: 0,
+                character: end,
+            },
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,
@@ -61,8 +67,14 @@ fn machine_applicable_marked_preferred() {
     let docs = DashMap::new();
     let diags = vec![synth_diag(13, 16, "MachineApplicable")];
     let range = Range {
-        start: Position { line: 0, character: 14 },
-        end: Position { line: 0, character: 14 },
+        start: Position {
+            line: 0,
+            character: 14,
+        },
+        end: Position {
+            line: 0,
+            character: 14,
+        },
     };
     let actions = code_actions_for_range(
         &diags,
@@ -89,8 +101,14 @@ fn non_machine_applicable_not_preferred() {
     let docs = DashMap::new();
     let diags = vec![synth_diag(13, 16, "MaybeIncorrect")];
     let range = Range {
-        start: Position { line: 0, character: 14 },
-        end: Position { line: 0, character: 14 },
+        start: Position {
+            line: 0,
+            character: 14,
+        },
+        end: Position {
+            line: 0,
+            character: 14,
+        },
     };
     let actions = code_actions_for_range(
         &diags,
@@ -123,8 +141,14 @@ fn uses_open_doc_line_map_when_available() {
     };
     let diag = Diagnostic {
         range: Range {
-            start: Position { line: 1, character: 4 },
-            end: Position { line: 1, character: 5 },
+            start: Position {
+                line: 1,
+                character: 4,
+            },
+            end: Position {
+                line: 1,
+                character: 5,
+            },
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,
@@ -137,8 +161,14 @@ fn uses_open_doc_line_map_when_available() {
     };
 
     let range = Range {
-        start: Position { line: 1, character: 4 },
-        end: Position { line: 1, character: 4 },
+        start: Position {
+            line: 1,
+            character: 4,
+        },
+        end: Position {
+            line: 1,
+            character: 4,
+        },
     };
     let actions = code_actions_for_range(
         &[diag],
@@ -155,5 +185,11 @@ fn uses_open_doc_line_map_when_available() {
     let changes = edit.changes.as_ref().unwrap();
     let (_uri, edits) = changes.iter().next().unwrap();
     // Position should be on line 1, character 4 (after `    `).
-    assert_eq!(edits[0].range.start, Position { line: 1, character: 4 });
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 1,
+            character: 4
+        }
+    );
 }

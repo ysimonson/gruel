@@ -38,8 +38,7 @@ fn references_for_function_in_two_files() {
     // 1 def in lib + 1 call in main = 2 references
     assert!(refs.len() >= 2, "got: {:?}", refs);
     // Definitions and callers must come from both files.
-    let unique_files: std::collections::HashSet<_> =
-        refs.iter().map(|s| s.file_id).collect();
+    let unique_files: std::collections::HashSet<_> = refs.iter().map(|s| s.file_id).collect();
     assert!(unique_files.len() >= 2);
 }
 

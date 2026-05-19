@@ -24,7 +24,9 @@ pub struct DocState {
 
 impl DocState {
     pub fn new(uri: Url, text: String, version: i32, open: bool) -> Self {
-        let path = uri.to_file_path().unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
         let line_map = LineMap::new(&text);
         Self {
             uri,
@@ -44,8 +46,8 @@ impl DocState {
     ) -> bool {
         match change.range {
             Some(range) => {
-                let start = position_to_byte(&self.line_map, &self.text, range.start, encoding)
-                    as usize;
+                let start =
+                    position_to_byte(&self.line_map, &self.text, range.start, encoding) as usize;
                 let end =
                     position_to_byte(&self.line_map, &self.text, range.end, encoding) as usize;
                 if start > end || end > self.text.len() {
@@ -88,8 +90,14 @@ mod tests {
         let mut d = doc("fn main() -> i32 { 0 }");
         let change = TextDocumentContentChangeEvent {
             range: Some(Range {
-                start: Position { line: 0, character: 19 },
-                end: Position { line: 0, character: 20 },
+                start: Position {
+                    line: 0,
+                    character: 19,
+                },
+                end: Position {
+                    line: 0,
+                    character: 20,
+                },
             }),
             range_length: None,
             text: "42".to_string(),
@@ -103,8 +111,14 @@ mod tests {
         let mut d = doc("a\nb\nc");
         let change = TextDocumentContentChangeEvent {
             range: Some(Range {
-                start: Position { line: 1, character: 1 },
-                end: Position { line: 1, character: 1 },
+                start: Position {
+                    line: 1,
+                    character: 1,
+                },
+                end: Position {
+                    line: 1,
+                    character: 1,
+                },
             }),
             range_length: None,
             text: "\nINSERTED".to_string(),

@@ -31,11 +31,7 @@ pub struct WorkspaceSymbol {
 
 /// Collect every top-level (and nested method/field/variant) symbol
 /// matching `query` (substring match, case-insensitive).
-pub fn workspace_symbols(
-    ast: &Ast,
-    interner: &ThreadedRodeo,
-    query: &str,
-) -> Vec<WorkspaceSymbol> {
+pub fn workspace_symbols(ast: &Ast, interner: &ThreadedRodeo, query: &str) -> Vec<WorkspaceSymbol> {
     let query_lower = query.to_lowercase();
     let mut out = Vec::new();
     for item in &ast.items {
@@ -44,12 +40,7 @@ pub fn workspace_symbols(
     out
 }
 
-fn emit_item(
-    item: &Item,
-    interner: &ThreadedRodeo,
-    query: &str,
-    out: &mut Vec<WorkspaceSymbol>,
-) {
+fn emit_item(item: &Item, interner: &ThreadedRodeo, query: &str, out: &mut Vec<WorkspaceSymbol>) {
     match item {
         Item::Function(f) => {
             push_if_match(&f.name, SymbolKind::Function, None, interner, query, out);
@@ -165,7 +156,9 @@ fn push_if_match(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];

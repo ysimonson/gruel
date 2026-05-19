@@ -493,7 +493,9 @@ fn walk_expr_for_let(expr: &Expr, target: Ident, found: &mut Option<Span>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];

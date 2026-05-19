@@ -49,11 +49,7 @@ fn type_error_produces_diagnostic() {
 
 #[test]
 fn unused_variable_produces_warning() {
-    let files = vec![ws(
-        "a.gruel",
-        "fn main() -> i32 { let unused = 1; 0 }",
-        1,
-    )];
+    let files = vec![ws("a.gruel", "fn main() -> i32 { let unused = 1; 0 }", 1)];
     let res = analyze(&files, &PreviewFeatures::default(), &Target::host());
     let warnings: Vec<_> = res
         .diagnostics

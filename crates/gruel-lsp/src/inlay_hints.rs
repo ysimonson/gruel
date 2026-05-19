@@ -5,9 +5,7 @@
 //! - After each unnamed call argument, show the parameter name (`x: 42`).
 
 use gruel_compiler::{Type, TypeInternPool};
-use gruel_parser::ast::{
-    Ast, BlockExpr, Expr, Function, Item, Pattern, Statement,
-};
+use gruel_parser::ast::{Ast, BlockExpr, Expr, Function, Item, Pattern, Statement};
 use gruel_util::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
 use rustc_hash::FxHashMap;
@@ -42,22 +40,54 @@ pub fn inlay_hints(
         match item {
             Item::Function(f) => {
                 if f.span.file_id == file_id {
-                    visit_expr(&f.body, interner, expr_types, type_pool, file_id, Some(ast), &mut hints);
+                    visit_expr(
+                        &f.body,
+                        interner,
+                        expr_types,
+                        type_pool,
+                        file_id,
+                        Some(ast),
+                        &mut hints,
+                    );
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    visit_expr(&m.body, interner, expr_types, type_pool, file_id, Some(ast), &mut hints);
+                    visit_expr(
+                        &m.body,
+                        interner,
+                        expr_types,
+                        type_pool,
+                        file_id,
+                        Some(ast),
+                        &mut hints,
+                    );
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    visit_expr(&m.body, interner, expr_types, type_pool, file_id, Some(ast), &mut hints);
+                    visit_expr(
+                        &m.body,
+                        interner,
+                        expr_types,
+                        type_pool,
+                        file_id,
+                        Some(ast),
+                        &mut hints,
+                    );
                 }
             }
             Item::Derive(d) => {
                 for m in &d.methods {
-                    visit_expr(&m.body, interner, expr_types, type_pool, file_id, Some(ast), &mut hints);
+                    visit_expr(
+                        &m.body,
+                        interner,
+                        expr_types,
+                        type_pool,
+                        file_id,
+                        Some(ast),
+                        &mut hints,
+                    );
                 }
             }
             _ => {}
@@ -76,9 +106,7 @@ fn visit_expr(
     out: &mut Vec<InlayHint>,
 ) {
     match expr {
-        Expr::Block(b) => {
-            visit_block(b, interner, expr_types, type_pool, file_id, ast, out)
-        }
+        Expr::Block(b) => visit_block(b, interner, expr_types, type_pool, file_id, ast, out),
         Expr::Call(c) => {
             // Look up the callee function for argument hints.
             if let Some(ast) = ast {
@@ -102,12 +130,22 @@ fn visit_expr(
                 }
             }
             for arg in &c.args {
-                visit_expr(&arg.expr, interner, expr_types, type_pool, file_id, ast, out);
+                visit_expr(
+                    &arg.expr, interner, expr_types, type_pool, file_id, ast, out,
+                );
             }
         }
         Expr::If(i) => {
             visit_expr(&i.cond, interner, expr_types, type_pool, file_id, ast, out);
-            visit_block(&i.then_block, interner, expr_types, type_pool, file_id, ast, out);
+            visit_block(
+                &i.then_block,
+                interner,
+                expr_types,
+                type_pool,
+                file_id,
+                ast,
+                out,
+            );
             if let Some(b) = &i.else_block {
                 visit_block(b, interner, expr_types, type_pool, file_id, ast, out);
             }
@@ -117,21 +155,41 @@ fn visit_expr(
             visit_block(&w.body, interner, expr_types, type_pool, file_id, ast, out);
         }
         Expr::For(f) => {
-            visit_expr(&f.iterable, interner, expr_types, type_pool, file_id, ast, out);
+            visit_expr(
+                &f.iterable,
+                interner,
+                expr_types,
+                type_pool,
+                file_id,
+                ast,
+                out,
+            );
             visit_block(&f.body, interner, expr_types, type_pool, file_id, ast, out);
         }
         Expr::Loop(l) => visit_block(&l.body, interner, expr_types, type_pool, file_id, ast, out),
         Expr::Match(m) => {
-            visit_expr(&m.scrutinee, interner, expr_types, type_pool, file_id, ast, out);
+            visit_expr(
+                &m.scrutinee,
+                interner,
+                expr_types,
+                type_pool,
+                file_id,
+                ast,
+                out,
+            );
             for arm in &m.arms {
-                visit_expr(&arm.body, interner, expr_types, type_pool, file_id, ast, out);
+                visit_expr(
+                    &arm.body, interner, expr_types, type_pool, file_id, ast, out,
+                );
             }
         }
         Expr::Binary(b) => {
             visit_expr(&b.left, interner, expr_types, type_pool, file_id, ast, out);
             visit_expr(&b.right, interner, expr_types, type_pool, file_id, ast, out);
         }
-        Expr::Unary(u) => visit_expr(&u.operand, interner, expr_types, type_pool, file_id, ast, out),
+        Expr::Unary(u) => visit_expr(
+            &u.operand, interner, expr_types, type_pool, file_id, ast, out,
+        ),
         Expr::Paren(p) => visit_expr(&p.inner, interner, expr_types, type_pool, file_id, ast, out),
         Expr::Return(r) => {
             if let Some(e) = &r.value {
@@ -148,9 +206,19 @@ fn visit_expr(
             visit_expr(&i.index, interner, expr_types, type_pool, file_id, ast, out);
         }
         Expr::MethodCall(m) => {
-            visit_expr(&m.receiver, interner, expr_types, type_pool, file_id, ast, out);
+            visit_expr(
+                &m.receiver,
+                interner,
+                expr_types,
+                type_pool,
+                file_id,
+                ast,
+                out,
+            );
             for arg in &m.args {
-                visit_expr(&arg.expr, interner, expr_types, type_pool, file_id, ast, out);
+                visit_expr(
+                    &arg.expr, interner, expr_types, type_pool, file_id, ast, out,
+                );
             }
         }
         _ => {}
@@ -275,10 +343,7 @@ mod tests {
             snap.type_pool.as_deref(),
             FileId::new(1),
         );
-        let type_hints: Vec<_> = hints
-            .iter()
-            .filter(|h| h.kind == InlayKind::Type)
-            .collect();
+        let type_hints: Vec<_> = hints.iter().filter(|h| h.kind == InlayKind::Type).collect();
         assert!(!type_hints.is_empty(), "expected at least one type hint");
         assert!(type_hints.iter().any(|h| h.label.contains("i32")));
     }

@@ -144,8 +144,14 @@ mod tests {
         };
         Diagnostic {
             range: Range {
-                start: Position { line: 0, character: start },
-                end: Position { line: 0, character: end },
+                start: Position {
+                    line: 0,
+                    character: start,
+                },
+                end: Position {
+                    line: 0,
+                    character: end,
+                },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             code: None,
@@ -167,8 +173,14 @@ mod tests {
         let docs = DashMap::new();
         let diags = vec![make_diag_with_suggestion(13, 16)];
         let range = Range {
-            start: Position { line: 0, character: 13 },
-            end: Position { line: 0, character: 13 },
+            start: Position {
+                line: 0,
+                character: 13,
+            },
+            end: Position {
+                line: 0,
+                character: 13,
+            },
         };
         let actions = code_actions_for_range(
             &diags,
@@ -194,8 +206,14 @@ mod tests {
         let docs = DashMap::new();
         let diags = vec![make_diag_with_suggestion(13, 16)];
         let range = Range {
-            start: Position { line: 5, character: 0 },
-            end: Position { line: 5, character: 0 },
+            start: Position {
+                line: 5,
+                character: 0,
+            },
+            end: Position {
+                line: 5,
+                character: 0,
+            },
         };
         let actions = code_actions_for_range(
             &diags,

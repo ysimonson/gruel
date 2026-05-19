@@ -155,19 +155,31 @@ mod tests {
         let li = LineMap::new(s);
         assert_eq!(
             byte_to_position(&li, s, 0, PositionEncoding::Utf8),
-            Position { line: 0, character: 0 }
+            Position {
+                line: 0,
+                character: 0
+            }
         );
         assert_eq!(
             byte_to_position(&li, s, 5, PositionEncoding::Utf8),
-            Position { line: 0, character: 5 }
+            Position {
+                line: 0,
+                character: 5
+            }
         );
         assert_eq!(
             byte_to_position(&li, s, 6, PositionEncoding::Utf8),
-            Position { line: 1, character: 0 }
+            Position {
+                line: 1,
+                character: 0
+            }
         );
         assert_eq!(
             byte_to_position(&li, s, 11, PositionEncoding::Utf8),
-            Position { line: 1, character: 5 }
+            Position {
+                line: 1,
+                character: 5
+            }
         );
     }
 
@@ -182,8 +194,14 @@ mod tests {
             (1, 2, 6),
             (2, 3, 11),
         ] {
-            let pos = Position { line, character: ch };
-            assert_eq!(position_to_byte(&li, s, pos, PositionEncoding::Utf8), expected);
+            let pos = Position {
+                line,
+                character: ch,
+            };
+            assert_eq!(
+                position_to_byte(&li, s, pos, PositionEncoding::Utf8),
+                expected
+            );
         }
     }
 
@@ -202,10 +220,7 @@ mod tests {
         assert_eq!(pos_after_crab.character, 4);
 
         // Round-trip
-        assert_eq!(
-            position_to_byte(&li, s, pos_a, PositionEncoding::Utf16),
-            0
-        );
+        assert_eq!(position_to_byte(&li, s, pos_a, PositionEncoding::Utf16), 0);
         assert_eq!(
             position_to_byte(&li, s, pos_after_crab, PositionEncoding::Utf16),
             6
@@ -218,8 +233,20 @@ mod tests {
         let li = LineMap::new(s);
         let span = Span::with_file(gruel_util::span::FileId::DEFAULT, 4, 5);
         let range = span_to_range(&li, s, span, PositionEncoding::Utf8);
-        assert_eq!(range.start, Position { line: 0, character: 4 });
-        assert_eq!(range.end, Position { line: 0, character: 5 });
+        assert_eq!(
+            range.start,
+            Position {
+                line: 0,
+                character: 4
+            }
+        );
+        assert_eq!(
+            range.end,
+            Position {
+                line: 0,
+                character: 5
+            }
+        );
     }
 
     #[test]
