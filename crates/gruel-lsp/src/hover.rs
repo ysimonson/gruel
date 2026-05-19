@@ -11,8 +11,8 @@
 
 use gruel_compiler::{Type, TypeInternPool};
 use gruel_parser::ast::{
-    Ast, ConstDecl, DeriveDecl, EnumDecl, EnumVariant, EnumVariantKind, FieldDecl, Function,
-    Ident, InterfaceDecl, Item, LinkExternBlock, Method, MethodSig, Param, StructDecl, TypeExpr,
+    Ast, ConstDecl, DeriveDecl, EnumDecl, EnumVariant, EnumVariantKind, FieldDecl, Function, Ident,
+    InterfaceDecl, Item, LinkExternBlock, Method, MethodSig, Param, StructDecl, TypeExpr,
 };
 use gruel_util::Span;
 use lasso::ThreadedRodeo;
@@ -519,7 +519,9 @@ fn type_expr_display(ty: &TypeExpr, interner: &ThreadedRodeo) -> String {
         TypeExpr::Named(ident) => interner.resolve(&ident.name).to_string(),
         TypeExpr::Unit(_) => "()".to_string(),
         TypeExpr::Never(_) => "!".to_string(),
-        TypeExpr::Array { element, length, .. } => {
+        TypeExpr::Array {
+            element, length, ..
+        } => {
             format!("[{}; {}]", type_expr_display(element, interner), length)
         }
         TypeExpr::AnonymousStruct { .. } => "struct { … }".to_string(),
@@ -557,7 +559,9 @@ fn type_expr_display(ty: &TypeExpr, interner: &ThreadedRodeo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];
@@ -572,11 +576,7 @@ mod tests {
         let (ast, interner) = parse(src);
         // Cursor on the `m` of `main` (byte 3).
         let h = hover_at(&ast, &interner, FileId::new(1), 3).unwrap();
-        assert!(
-            h.markdown.contains("fn main"),
-            "got: {}",
-            h.markdown
-        );
+        assert!(h.markdown.contains("fn main"), "got: {}", h.markdown);
         assert!(h.markdown.contains("-> i32"));
     }
 
@@ -605,7 +605,11 @@ mod tests {
         let (ast, interner) = parse(src);
         let byte = src.find(": i32").unwrap() as u32 - 1; // on 'x'
         let h = hover_at(&ast, &interner, FileId::new(1), byte).unwrap();
-        assert!(h.markdown.contains("x: i32") || h.markdown.contains("x"), "got: {}", h.markdown);
+        assert!(
+            h.markdown.contains("x: i32") || h.markdown.contains("x"),
+            "got: {}",
+            h.markdown
+        );
     }
 
     #[test]

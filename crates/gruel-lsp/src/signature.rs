@@ -190,11 +190,7 @@ fn find_function(ast: &Ast, name: Spur) -> Option<Function> {
     None
 }
 
-fn build_signature(
-    f: Function,
-    interner: &ThreadedRodeo,
-    active: usize,
-) -> SignatureHelpResult {
+fn build_signature(f: Function, interner: &ThreadedRodeo, active: usize) -> SignatureHelpResult {
     let mut label = String::from("fn ");
     label.push_str(interner.resolve(&f.name.name));
     label.push('(');
@@ -232,7 +228,9 @@ fn type_expr_display(ty: &TypeExpr, interner: &ThreadedRodeo) -> String {
         TypeExpr::Named(ident) => interner.resolve(&ident.name).to_string(),
         TypeExpr::Unit(_) => "()".to_string(),
         TypeExpr::Never(_) => "!".to_string(),
-        TypeExpr::Array { element, length, .. } => {
+        TypeExpr::Array {
+            element, length, ..
+        } => {
             format!("[{}; {}]", type_expr_display(element, interner), length)
         }
         TypeExpr::Tuple { elems, .. } => {
@@ -256,7 +254,9 @@ fn type_expr_display(ty: &TypeExpr, interner: &ThreadedRodeo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];

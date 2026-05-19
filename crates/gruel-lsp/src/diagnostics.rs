@@ -1,8 +1,8 @@
 //! Convert Gruel `JsonDiagnostic` values to LSP `Diagnostic` values
 //! (ADR-0091).
 
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use gruel_compiler::{JsonDiagnostic, JsonSpan, JsonSuggestion};
 use lsp_types::{
@@ -173,6 +173,12 @@ mod tests {
         assert_eq!(lsp.severity, Some(DiagnosticSeverity::ERROR));
         assert!(lsp.message.contains("type mismatch"));
         assert!(lsp.message.contains("note: expected i32"));
-        assert_eq!(lsp.range.start, Position { line: 1, character: 4 });
+        assert_eq!(
+            lsp.range.start,
+            Position {
+                line: 1,
+                character: 4
+            }
+        );
     }
 }

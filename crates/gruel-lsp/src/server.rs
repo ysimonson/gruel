@@ -11,14 +11,13 @@ use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, InlayHint, InlayHintKind,
-    InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind, MessageType, OneOf,
-    ParameterInformation, ParameterLabel, PositionEncodingKind, ReferenceParams,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
+    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind,
+    MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
+    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
     TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
 use tokio::sync::Mutex;
@@ -109,8 +108,7 @@ impl Backend {
         );
         let result = analysis::analyze(&files, &self.preview_features, &Target::host());
         let root = self.workspace_root.lock().await.clone();
-        let by_file =
-            diagnostics::group_by_file(result.diagnostics.into_iter(), root.as_deref());
+        let by_file = diagnostics::group_by_file(result.diagnostics.into_iter(), root.as_deref());
         let mut flat = Vec::new();
         for (path, diags) in &by_file {
             if let Ok(uri) = Url::from_file_path(path) {
@@ -170,8 +168,10 @@ impl AnalysisWorker {
                 }
             }
 
-            let files =
-                gather_workspace_files(&self.docs, self.workspace_root.lock().await.clone().as_deref());
+            let files = gather_workspace_files(
+                &self.docs,
+                self.workspace_root.lock().await.clone().as_deref(),
+            );
             let preview_features = self.preview_features.clone();
             let target = self.target.clone();
 
@@ -218,7 +218,9 @@ impl AnalysisWorker {
                 .collect();
             for uri in previously_published {
                 if !current_files.contains(&uri) {
-                    self.client.publish_diagnostics(uri.clone(), vec![], None).await;
+                    self.client
+                        .publish_diagnostics(uri.clone(), vec![], None)
+                        .await;
                     self.published_files.remove(&uri);
                     self.last_diagnostics.remove(&uri);
                 }
@@ -228,7 +230,9 @@ impl AnalysisWorker {
             for kv in self.docs.iter() {
                 let uri = kv.key().clone();
                 if !current_files.contains(&uri) {
-                    self.client.publish_diagnostics(uri.clone(), vec![], None).await;
+                    self.client
+                        .publish_diagnostics(uri.clone(), vec![], None)
+                        .await;
                     self.published_files.remove(&uri);
                     self.last_diagnostics.remove(&uri);
                 }
@@ -293,10 +297,7 @@ fn gather_workspace_files(
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(
-        &self,
-        params: InitializeParams,
-    ) -> jsonrpc::Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> jsonrpc::Result<InitializeResult> {
         // Pick UTF-8 if the client supports it; UTF-16 otherwise.
         let chosen_encoding = pick_encoding(&params);
         *self.encoding.lock().await = chosen_encoding;
@@ -315,10 +316,7 @@ impl LanguageServer for Backend {
             .and_then(|f| f.uri.to_file_path().ok())
             .or_else(|| {
                 #[allow(deprecated)]
-                params
-                    .root_uri
-                    .as_ref()
-                    .and_then(|u| u.to_file_path().ok())
+                params.root_uri.as_ref().and_then(|u| u.to_file_path().ok())
             })
             .or_else(|| std::env::var_os("GRUEL_LSP_ROOT").map(PathBuf::from));
         *self.workspace_root.lock().await = root_path;
@@ -409,7 +407,11 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri.clone();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .clone();
         let position = params.text_document_position_params.position;
         let encoding = *self.encoding.lock().await;
 
@@ -464,7 +466,11 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> jsonrpc::Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri.clone();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .clone();
         let position = params.text_document_position_params.position;
         let encoding = *self.encoding.lock().await;
 
@@ -511,12 +517,8 @@ impl LanguageServer for Backend {
             Ok(u) => u,
             Err(_) => return Ok(None),
         };
-        let range = crate::position::span_to_range(
-            def_line_map,
-            &def_source.text,
-            def_span,
-            encoding,
-        );
+        let range =
+            crate::position::span_to_range(def_line_map, &def_source.text, def_span, encoding);
 
         Ok(Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri,
@@ -528,7 +530,11 @@ impl LanguageServer for Backend {
         &self,
         params: SignatureHelpParams,
     ) -> jsonrpc::Result<Option<SignatureHelp>> {
-        let uri = params.text_document_position_params.text_document.uri.clone();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .clone();
         let position = params.text_document_position_params.position;
         let encoding = *self.encoding.lock().await;
 
@@ -555,15 +561,11 @@ impl LanguageServer for Backend {
         };
         let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
 
-        let result = match crate::signature::signature_help(
-            &snap.ast,
-            &snap.interner,
-            file_id,
-            byte,
-        ) {
-            Some(r) => r,
-            None => return Ok(None),
-        };
+        let result =
+            match crate::signature::signature_help(&snap.ast, &snap.interner, file_id, byte) {
+                Some(r) => r,
+                None => return Ok(None),
+            };
 
         let parameters = result
             .parameters
@@ -586,10 +588,7 @@ impl LanguageServer for Backend {
         }))
     }
 
-    async fn references(
-        &self,
-        params: ReferenceParams,
-    ) -> jsonrpc::Result<Option<Vec<Location>>> {
+    async fn references(&self, params: ReferenceParams) -> jsonrpc::Result<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri.clone();
         let position = params.text_document_position.position;
         let include_decl = params.context.include_declaration;
@@ -618,8 +617,13 @@ impl LanguageServer for Backend {
         };
         let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
 
-        let spans =
-            crate::references::references_at(&snap.ast, &snap.interner, file_id, byte, include_decl);
+        let spans = crate::references::references_at(
+            &snap.ast,
+            &snap.interner,
+            file_id,
+            byte,
+            include_decl,
+        );
 
         let mut locations = Vec::new();
         for s in spans {
@@ -656,11 +660,8 @@ impl LanguageServer for Backend {
             Some(s) => s,
             None => return Ok(None),
         };
-        let syms = crate::workspace_symbols::workspace_symbols(
-            &snap.ast,
-            &snap.interner,
-            &params.query,
-        );
+        let syms =
+            crate::workspace_symbols::workspace_symbols(&snap.ast, &snap.interner, &params.query);
         let mut out: Vec<SymbolInformation> = Vec::new();
         for sym in syms {
             let src = match snap.sources.get(&sym.span.file_id) {
@@ -729,7 +730,8 @@ impl LanguageServer for Backend {
         };
         let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
 
-        let items = crate::completion::complete_at(&snap.ast, &snap.interner, file_id, byte, trigger);
+        let items =
+            crate::completion::complete_at(&snap.ast, &snap.interner, file_id, byte, trigger);
         let lsp_items: Vec<CompletionItem> = items
             .into_iter()
             .map(|i| CompletionItem {
@@ -746,10 +748,7 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn inlay_hint(
-        &self,
-        params: InlayHintParams,
-    ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
+    async fn inlay_hint(&self, params: InlayHintParams) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri.clone();
         let encoding = *self.encoding.lock().await;
 
@@ -787,7 +786,8 @@ impl LanguageServer for Backend {
             .into_iter()
             .filter(|h| h.file_id == file_id)
             .map(|h| {
-                let pos = crate::position::byte_to_position(line_map, &source.text, h.byte, encoding);
+                let pos =
+                    crate::position::byte_to_position(line_map, &source.text, h.byte, encoding);
                 InlayHint {
                     position: pos,
                     label: InlayHintLabel::String(h.label),

@@ -44,18 +44,22 @@ error_contains = "both `link_extern` (dynamic) and `static_link_extern`"
 [[case]]
 name = "two_static_link_extern_same_library_ok"
 spec = ["10.5:1", "10.5:3", "10.5:4"]
+# Note: deliberately uses libm functions without glibc ifunc resolvers
+# (`sqrt`, `floor`). Functions like `sin`/`cos`/`tan` have ifunc dispatch
+# that pulls in `_dl_x86_cpu_features`, which is unresolvable when statically
+# linking glibc's libm on x86_64.
 source = """
 static_link_extern("m") {
-    @mark(unchecked) fn sin(x: f64) -> f64;
+    @mark(unchecked) fn sqrt(x: f64) -> f64;
 }
 
 static_link_extern("m") {
-    @mark(unchecked) fn cos(x: f64) -> f64;
+    @mark(unchecked) fn floor(x: f64) -> f64;
 }
 
 fn main() -> i32 {
-    let _x: f64 = checked { sin(0.0) };
-    let _y: f64 = checked { cos(0.0) };
+    let _x: f64 = checked { sqrt(0.0) };
+    let _y: f64 = checked { floor(0.0) };
     0
 }
 """

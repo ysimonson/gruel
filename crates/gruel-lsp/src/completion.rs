@@ -39,8 +39,28 @@ pub struct CompletionItem {
 }
 
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "struct", "enum", "interface", "derive", "const", "pub", "if", "else",
-    "match", "while", "for", "loop", "in", "break", "continue", "return", "true", "false", "self",
+    "fn",
+    "let",
+    "mut",
+    "struct",
+    "enum",
+    "interface",
+    "derive",
+    "const",
+    "pub",
+    "if",
+    "else",
+    "match",
+    "while",
+    "for",
+    "loop",
+    "in",
+    "break",
+    "continue",
+    "return",
+    "true",
+    "false",
+    "self",
     "Self",
 ];
 
@@ -314,7 +334,9 @@ fn _suppress() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gruel_compiler::{FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview};
+    use gruel_compiler::{
+        FileId, PreviewFeatures, SourceFile, merge_symbols, parse_all_files_with_preview,
+    };
 
     fn parse(source: &str) -> (Ast, ThreadedRodeo) {
         let sources = vec![SourceFile::new("main.gruel", source, FileId::new(1))];
@@ -368,7 +390,9 @@ fn main() -> i32 { 0 }"#;
         let byte = src.find("0 }").unwrap() as u32;
         let items = complete_at(&ast, &interner, FileId::new(1), byte, None);
         assert!(
-            items.iter().any(|i| i.label == "answer" && i.kind == CompletionKind::Variable),
+            items
+                .iter()
+                .any(|i| i.label == "answer" && i.kind == CompletionKind::Variable),
             "expected `answer` in completion, got: {:?}",
             items.iter().map(|i| &i.label).collect::<Vec<_>>()
         );

@@ -75,13 +75,15 @@ exit_code = 7
 name = "ffi_unchecked_static_link_extern"
 spec = ["10.2:10"]
 description = "`static_link_extern` accepts `@mark(unchecked)` the same way as `link_extern`."
+# Note: uses `sqrt` (no glibc ifunc resolver on x86_64) instead of `tan`,
+# whose ifunc dispatch breaks static linking against libm on Linux.
 source = """
 static_link_extern("m") {
-    @mark(unchecked) fn tan(x: f64) -> f64;
+    @mark(unchecked) fn sqrt(x: f64) -> f64;
 }
 
 fn main() -> i32 {
-    let _r: f64 = checked { tan(0.0) };
+    let _r: f64 = checked { sqrt(0.0) };
     0
 }
 """

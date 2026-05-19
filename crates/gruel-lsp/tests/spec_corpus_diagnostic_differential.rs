@@ -210,10 +210,7 @@ fn run_differential() {
             }
         }
         if disagreements.len() > 10 {
-            msg.push_str(&format!(
-                "\n  ... and {} more\n",
-                disagreements.len() - 10
-            ));
+            msg.push_str(&format!("\n  ... and {} more\n", disagreements.len() - 10));
         }
         panic!("{}", msg);
     }

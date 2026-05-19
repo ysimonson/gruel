@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gruel_compiler::{
-    FileId, JsonDiagnostic, MultiFileJsonFormatter, PreviewFeatures, SourceFile, SourceInfo,
-    Type, TypeInternPool, compile_frontend_from_ast_with_options_full_target, merge_symbols,
+    FileId, JsonDiagnostic, MultiFileJsonFormatter, PreviewFeatures, SourceFile, SourceInfo, Type,
+    TypeInternPool, compile_frontend_from_ast_with_options_full_target, merge_symbols,
     parse_all_files_with_preview, prepend_prelude,
 };
 use gruel_parser::ast::Ast;
@@ -86,7 +86,12 @@ pub fn analyze(
     // Source info for diagnostic formatting.
     let source_infos: Vec<(FileId, SourceInfo<'_>)> = files
         .iter()
-        .map(|f| (f.file_id, SourceInfo::new(f.text.as_str(), path_str(&f.path))))
+        .map(|f| {
+            (
+                f.file_id,
+                SourceInfo::new(f.text.as_str(), path_str(&f.path)),
+            )
+        })
         .collect();
     let formatter = MultiFileJsonFormatter::new(source_infos);
 
@@ -157,9 +162,7 @@ pub fn analyze(
             // path.
             return AnalysisResult {
                 diagnostics,
-                snapshot: build_ast_snapshot(files, preview_features)
-                    .map(|s| s)
-                    .ok(),
+                snapshot: build_ast_snapshot(files, preview_features).map(|s| s).ok(),
             };
         }
     };
@@ -294,11 +297,7 @@ mod tests {
 
     #[test]
     fn reports_warnings() {
-        let files = vec![wsf(
-            "main.gruel",
-            "fn main() -> i32 { let x = 42; 0 }",
-            1,
-        )];
+        let files = vec![wsf("main.gruel", "fn main() -> i32 { let x = 42; 0 }", 1)];
         let res = analyze(&files, &PreviewFeatures::default(), &Target::host());
         // Unused-variable warning.
         assert!(res.diagnostics.iter().any(|d| d.severity == "warning"));
