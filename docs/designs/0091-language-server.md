@@ -1,12 +1,12 @@
 ---
 id: 0091
 title: Language Server (LSP) for Gruel
-status: proposal
+status: implemented
 tags: [tooling, ide, lsp, dx]
 feature-flag: language_server
 created: 2026-05-17
-accepted:
-implemented:
+accepted: 2026-05-18
+implemented: 2026-05-19
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -794,7 +794,7 @@ pump.
   - Integration tests for trigger-character completion, member access
     completion, and inlay hint rendering.
 
-- [ ] **Phase 7: Polish + editor integration docs (defer tree-sitter
+- [x] **Phase 7: Polish + editor integration docs (defer tree-sitter
       acceleration and lightweight-analyzer unless profiling demands
       them)**
   - VS Code extension stub (a minimal `package.json` + `extension.ts`
@@ -805,9 +805,9 @@ pump.
     fact that highlights/folds are tree-sitter, not LSP.
   - If profiling shows responsiveness gaps under load, *then* wire the
     tree-sitter parser in as the "fast path" for syntactic queries
-    (otherwise skip).
-  - Stabilisation decision: when all six previous phases ship and tests
-    are green, remove the `LanguageServer` preview gate.
+    (otherwise skip). Deferred — no responsiveness gap measured yet.
+  - Stabilisation: removed the `LanguageServer` preview gate. The
+    server now starts via `gruel lsp` with no flags.
 
 ## Consequences
 

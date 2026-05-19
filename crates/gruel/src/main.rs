@@ -1432,25 +1432,11 @@ fn run_run(opts: RunOpts, timing_data: Option<timing::TimingData>) {
 }
 
 /// ADR-0091: spawn the Gruel Language Server over stdio.
-///
-/// The server is gated behind the `language_server` preview feature; we
-/// check it here at the entry point because the LSP doesn't have a natural
-/// sema call where `require_preview()` would otherwise surface the gate.
 fn run_lsp(opts: LspOpts) {
-    if !opts.preview_features.contains(&PreviewFeature::LanguageServer) {
-        eprintln!(
-            "error: the language server is a preview feature; pass `--preview language_server` to enable it (ADR-0091)"
-        );
-        std::process::exit(1);
-    }
     // `--root` is honoured as a fallback workspace root; the LSP `initialize`
     // request can still override it. We pass it through via an env-style
     // signal so the library doesn't need to know about CLI types.
     if let Some(root) = &opts.root {
-        // Best-effort: tell the server we want this root by setting an env
-        // var the server picks up at startup. Kept as an env knob to avoid
-        // expanding the library's public surface for a single CLI hook.
-        // The library reads `GRUEL_LSP_ROOT` on initialize.
         // SAFETY: setting env vars before any other threads exist (we have
         // not started the tokio runtime yet).
         unsafe {

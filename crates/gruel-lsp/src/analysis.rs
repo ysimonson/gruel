@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gruel_compiler::{
     FileId, JsonDiagnostic, MultiFileJsonFormatter, PreviewFeatures, SourceFile, SourceInfo,
     Type, TypeInternPool, compile_frontend_from_ast_with_options_full_target, merge_symbols,
-    parse_all_files_with_preview,
+    parse_all_files_with_preview, prepend_prelude,
 };
 use gruel_parser::ast::Ast;
 use gruel_target::Target;
@@ -120,11 +120,28 @@ pub fn analyze(
         }
     };
 
-    let ast_for_snapshot = merged.ast.clone();
+    // Inline the prelude so sema's TypeKind / Vec / etc. injections see
+    // their target types. The CLI driver does the same thing via
+    // `CompilationUnit::parse`; we follow suit for parity (and for the
+    // diagnostic differential to hold).
+    let (ast_with_prelude, interner_with_prelude) =
+        match prepend_prelude(merged.ast, merged.interner, preview_features) {
+            Ok(p) => p,
+            Err(errors) => {
+                for e in errors.iter() {
+                    diagnostics.push(formatter.format_error(e));
+                }
+                return AnalysisResult {
+                    diagnostics,
+                    snapshot: None,
+                };
+            }
+        };
+    let ast_for_snapshot = ast_with_prelude.clone();
 
     let state = match compile_frontend_from_ast_with_options_full_target(
-        merged.ast,
-        merged.interner,
+        ast_with_prelude,
+        interner_with_prelude,
         preview_features,
         true, // suppress comptime @dbg print
         target,
@@ -196,8 +213,10 @@ fn build_ast_snapshot(
         .collect();
     let parsed = parse_all_files_with_preview(&sources, preview_features).map_err(|_| ())?;
     let merged = merge_symbols(parsed).map_err(|_| ())?;
-    let interner = Arc::new(merged.interner);
-    Ok(build_snapshot(files, merged.ast, interner))
+    let (ast, interner) =
+        prepend_prelude(merged.ast, merged.interner, preview_features).map_err(|_| ())?;
+    let interner = Arc::new(interner);
+    Ok(build_snapshot(files, ast, interner))
 }
 
 fn build_snapshot(

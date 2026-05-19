@@ -376,8 +376,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// Gruel Language Server (ADR-0091). Gated until the LSP stabilises.
-    LanguageServer,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -409,7 +407,6 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::LanguageServer => "ADR-0091",
         }
     }
 
@@ -2182,15 +2179,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, language_server");
-    }
-
-    #[test]
-    fn test_preview_feature_language_server() {
-        let feature: PreviewFeature = "language_server".parse().unwrap();
-        assert_eq!(feature, PreviewFeature::LanguageServer);
-        assert_eq!(feature.name(), "language_server");
-        assert_eq!(feature.adr(), "ADR-0091");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

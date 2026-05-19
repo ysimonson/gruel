@@ -124,6 +124,7 @@ graph LR
 | `gruel-runtime` | Runtime support |
 | `gruel-builtins` | Built-in type definitions (String, future Vec, etc.) |
 | `gruel-doc` | Doc-comment rendering (Markdown + HTML), driven by `gruel doc` (ADR-0089) |
+| `gruel-lsp` | Language Server Protocol implementation, driven by `gruel lsp` (ADR-0091) |
 
 ### Multi-File Compilation
 
@@ -613,7 +614,7 @@ When all tests pass and the feature is complete:
    `make test`) fails the build if the tree-sitter and chumsky parsers disagree on
    acceptance for any spec or UI test case.
 
-10. **Check `gruel-lsp` impact** (applies once ADR-0091 ships; skip until then).
+10. **Check `gruel-lsp` impact** (ADR-0091).
     The LSP is a thin façade over `gruel-compiler`'s public API, so most language
     changes propagate automatically:
     - **Auto-synced — no LSP code change:** new diagnostic codes (flow via

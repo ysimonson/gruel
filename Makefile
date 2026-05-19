@@ -8,6 +8,7 @@
         fuzz-structured-compiler fuzz-structured-invalid \
         fuzz-comptime-differential fuzz-parser-differential \
         tree-sitter-generate tree-sitter-test \
+        lsp-diagnostic-differential \
         claude
 
 # Detect LLVM 22 on macOS (Homebrew). Set LLVM_SYS_221_PREFIX if not already set.
@@ -42,7 +43,7 @@ doctest:
 
 # Run all tests (unit + doctests + spec + traceability + UI tests + examples).
 # Pass ARGS="pattern" to filter spec/UI/example tests, e.g.: make test ARGS="1.1"
-test: quick-test doctest tree-sitter-differential
+test: quick-test doctest tree-sitter-differential lsp-diagnostic-differential
 	$(TIMEOUT) cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \
@@ -65,6 +66,16 @@ test: quick-test doctest tree-sitter-differential
 tree-sitter-differential:
 	$(TIMEOUT) cargo test --manifest-path tree-sitter-gruel/bindings/rust/Cargo.toml \
 		--test spec_corpus_differential -- --nocapture
+
+# ADR-0091: assert that gruel-lsp emits the same diagnostics as the
+# `gruel check` code path for every TOML case in crates/gruel-spec/cases/
+# and crates/gruel-ui-tests/cases/. Catches LSP/CLI drift that the
+# unit-test suite would miss (e.g. a sema refactor that the LSP caller
+# doesn't keep up with).
+lsp-diagnostic-differential:
+	$(TIMEOUT) cargo test -p gruel-lsp \
+		--test spec_corpus_diagnostic_differential \
+		-- --nocapture --test-threads=1
 
 # Format all Rust files.
 fmt:

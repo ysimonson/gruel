@@ -1,0 +1,51 @@
+{
+  "name": "gruel-lsp",
+  "displayName": "Gruel Language Server",
+  "description": "Language Server Protocol client for the Gruel programming language (ADR-0091).",
+  "version": "0.1.0",
+  "publisher": "gruel-lang",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [
+    "onLanguage:gruel"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "gruel",
+        "aliases": ["Gruel"],
+        "extensions": [".gruel"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "title": "Gruel",
+      "properties": {
+        "gruel.serverPath": {
+          "type": "string",
+          "default": "gruel",
+          "description": "Path to the gruel binary that hosts `gruel lsp`."
+        },
+        "gruel.previewFeatures": {
+          "type": "array",
+          "default": [],
+          "description": "Preview features to pass to `gruel lsp --preview ...`."
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "build": "tsc -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  }
+}
