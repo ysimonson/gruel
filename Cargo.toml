@@ -11,6 +11,7 @@ members = [
     "crates/gruel-doc",
     "crates/gruel-intrinsics",
     "crates/gruel-lexer",
+    "crates/gruel-lsp",
     "crates/gruel-parser",
     "crates/gruel-rir",
     "crates/gruel-runtime",
@@ -38,6 +39,7 @@ gruel-compiler = { path = "crates/gruel-compiler", default-features = false }
 gruel-doc = { path = "crates/gruel-doc" }
 gruel-intrinsics = { path = "crates/gruel-intrinsics" }
 gruel-lexer = { path = "crates/gruel-lexer" }
+gruel-lsp = { path = "crates/gruel-lsp" }
 gruel-parser = { path = "crates/gruel-parser" }
 gruel-rir = { path = "crates/gruel-rir" }
 gruel-target = { path = "crates/gruel-target" }
@@ -68,6 +70,15 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 walkdir = "2"
+
+# Language server (ADR-0091)
+arc-swap = "1.7"
+dashmap = "6"
+ignore = "0.4"
+lsp-types = "0.94"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std"] }
+tokio-util = "0.7"
+tower-lsp = "0.20"
 
 # gruel-runtime is built with special flags (panic=abort, opt-level=z, etc.)
 # via gruel-compiler's build.rs using a direct rustc invocation.

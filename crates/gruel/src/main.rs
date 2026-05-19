@@ -368,6 +368,12 @@ enum CliCommand {
     Doc(DocArgs),
     /// Emit intermediate representation(s) and exit.
     Emit(EmitArgs),
+    /// Run the Language Server Protocol server over stdio (ADR-0091).
+    ///
+    /// Highlights, folds, and document outlines come from the tree-sitter
+    /// grammar (ADR-0090) — this LSP only fills the semantic surface
+    /// (diagnostics, hover, goto, completion, code actions).
+    Lsp(LspArgs),
     /// Manage the incremental compilation cache (ADR-0074).
     Cache {
         #[command(subcommand)]
@@ -592,6 +598,24 @@ struct EmitArgs {
     benchmark_json: bool,
 }
 
+/// `gruel lsp` arguments (ADR-0091).
+#[derive(Args, Debug)]
+struct LspArgs {
+    /// Enable a preview feature (can be repeated). `--preview language_server`
+    /// is required for the server to start until the feature is stabilised.
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
+
+    /// Workspace root override (defaults to `initializeParams.rootUri`).
+    #[arg(long, value_name = "PATH")]
+    root: Option<String>,
+
+    /// Cache directory for incremental compilation. Inherits the same
+    /// resolution as `gruel build`/`run`/`check`.
+    #[arg(long, value_name = "PATH", env = "GRUEL_CACHE_DIR")]
+    cache_dir: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 enum CacheActionArgs {
     /// Print cache statistics.
@@ -691,6 +715,13 @@ enum CacheOpts {
     Clean { cache_dir: String },
 }
 
+/// Resolved options for `gruel lsp` (ADR-0091).
+struct LspOpts {
+    preview_features: PreviewFeatures,
+    root: Option<String>,
+    cache_dir: Option<String>,
+}
+
 /// The fully-resolved CLI command, after defaults/conflicts have been
 /// normalized.
 enum ResolvedCommand {
@@ -699,6 +730,7 @@ enum ResolvedCommand {
     Check(CheckOpts),
     Doc(DocOpts),
     Emit(EmitOpts),
+    Lsp(LspOpts),
     Cache(CacheOpts),
 }
 
@@ -866,6 +898,15 @@ fn resolve_emit(args: EmitArgs) -> Result<EmitOpts, String> {
     })
 }
 
+fn resolve_lsp(args: LspArgs) -> Result<LspOpts, String> {
+    let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+    Ok(LspOpts {
+        preview_features,
+        root: args.root,
+        cache_dir: args.cache_dir,
+    })
+}
+
 fn resolve_cli(cli: Cli) -> Result<ParsedCli, String> {
     let globals = GlobalOpts {
         log_level: cli.log_level,
@@ -877,6 +918,7 @@ fn resolve_cli(cli: Cli) -> Result<ParsedCli, String> {
         CliCommand::Check(args) => ResolvedCommand::Check(resolve_check(args)?),
         CliCommand::Doc(args) => ResolvedCommand::Doc(resolve_doc(args)?),
         CliCommand::Emit(args) => ResolvedCommand::Emit(resolve_emit(args)?),
+        CliCommand::Lsp(args) => ResolvedCommand::Lsp(resolve_lsp(args)?),
         CliCommand::Cache { action } => ResolvedCommand::Cache(match action {
             CacheActionArgs::Stats { cache_dir } => CacheOpts::Stats { cache_dir },
             CacheActionArgs::Clean { cache_dir } => CacheOpts::Clean { cache_dir },
@@ -1071,7 +1113,9 @@ fn main() {
         ResolvedCommand::Run(o) => (o.time_passes, false),
         ResolvedCommand::Check(o) => (o.time_passes, o.benchmark_json),
         ResolvedCommand::Emit(o) => (o.time_passes, o.benchmark_json),
-        ResolvedCommand::Doc(_) | ResolvedCommand::Cache(_) => (false, false),
+        ResolvedCommand::Doc(_) | ResolvedCommand::Cache(_) | ResolvedCommand::Lsp(_) => {
+            (false, false)
+        }
     };
 
     let timing_data = init_tracing(
@@ -1087,6 +1131,7 @@ fn main() {
         ResolvedCommand::Check(opts) => run_check(opts, timing_data),
         ResolvedCommand::Doc(opts) => run_doc(&opts),
         ResolvedCommand::Emit(opts) => run_emit(opts, timing_data),
+        ResolvedCommand::Lsp(opts) => run_lsp(opts),
         ResolvedCommand::Cache(CacheOpts::Stats { cache_dir }) => {
             run_cache_stats(std::path::Path::new(&cache_dir));
         }
@@ -1384,6 +1429,44 @@ fn run_run(opts: RunOpts, timing_data: Option<timing::TimingData>) {
         }
     }
     std::process::exit(1);
+}
+
+/// ADR-0091: spawn the Gruel Language Server over stdio.
+///
+/// The server is gated behind the `language_server` preview feature; we
+/// check it here at the entry point because the LSP doesn't have a natural
+/// sema call where `require_preview()` would otherwise surface the gate.
+fn run_lsp(opts: LspOpts) {
+    if !opts.preview_features.contains(&PreviewFeature::LanguageServer) {
+        eprintln!(
+            "error: the language server is a preview feature; pass `--preview language_server` to enable it (ADR-0091)"
+        );
+        std::process::exit(1);
+    }
+    // `--root` is honoured as a fallback workspace root; the LSP `initialize`
+    // request can still override it. We pass it through via an env-style
+    // signal so the library doesn't need to know about CLI types.
+    if let Some(root) = &opts.root {
+        // Best-effort: tell the server we want this root by setting an env
+        // var the server picks up at startup. Kept as an env knob to avoid
+        // expanding the library's public surface for a single CLI hook.
+        // The library reads `GRUEL_LSP_ROOT` on initialize.
+        // SAFETY: setting env vars before any other threads exist (we have
+        // not started the tokio runtime yet).
+        unsafe {
+            std::env::set_var("GRUEL_LSP_ROOT", root);
+        }
+    }
+    if let Some(cache_dir) = &opts.cache_dir {
+        // SAFETY: setting env vars before any other threads exist.
+        unsafe {
+            std::env::set_var("GRUEL_CACHE_DIR", cache_dir);
+        }
+    }
+    if let Err(e) = gruel_lsp::run_server(opts.preview_features) {
+        eprintln!("gruel-lsp: server error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 fn run_check(opts: CheckOpts, timing_data: Option<timing::TimingData>) {

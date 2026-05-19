@@ -709,7 +709,7 @@ pump.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Scaffolding + diagnostics**
+- [x] **Phase 1: Scaffolding + diagnostics**
   - Add `gruel-lsp` crate with `tower-lsp`, `tokio`, `dashmap`,
     `arc-swap`, `tokio-util` (for `CancellationToken`) deps.
   - Add `gruel lsp` subcommand in `crates/gruel/src/main.rs`.

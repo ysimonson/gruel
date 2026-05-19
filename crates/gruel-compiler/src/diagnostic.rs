@@ -409,7 +409,7 @@ pub struct JsonSpan {
 }
 
 /// A suggested fix in JSON format.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct JsonSuggestion {
     /// Human-readable description.
     pub message: String,
