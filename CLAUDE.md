@@ -126,26 +126,37 @@ graph LR
 | `gruel-doc` | Doc-comment rendering (Markdown + HTML), driven by `gruel doc` (ADR-0089) |
 | `gruel-lsp` | Language Server Protocol implementation, driven by `gruel lsp` (ADR-0091) |
 
-### Multi-File Compilation
+### Multi-File Compilation and Modules
 
-Gruel supports compiling multiple source files into a single executable:
+Gruel has a "file is a struct" module system (ADR-0026, stable since
+2026-01-04). It supersedes the flat namespace from ADR-0023. Each
+`.gruel` file evaluates to an anonymous struct value whose fields are
+its `pub` top-level items. Other files pull it in via the `@import`
+intrinsic, and address its members through that binding:
 
-```bash
-# All files share a flat global namespace (no modules yet)
-gruel build main.gruel utils.gruel lib.gruel -o program
+```gruel
+const math = @import("math.gruel");
+const my_pi = math.pi;
 ```
 
 **Key semantics:**
-- All functions, structs, and enums are globally visible across files
-- Duplicate definitions (same name in multiple files) cause a compile error
-- `main()` must exist in exactly one file
-- Files are parsed in parallel, then merged for semantic analysis
+- Per-file visibility: `pub` is required for cross-file access; default
+  is private.
+- `@import` paths resolve relative to the importing file, then through
+  the std / prelude search paths.
+- Items are namespaced by the importing binding; collisions only occur
+  on direct re-declaration *within* a single file.
+- Doc comments (`///`) attach to the items they precede; a leading doc
+  block on a file becomes the module-level doc (read by `gruel doc` and
+  the LSP).
 
-**Current limitations (will be addressed by the module system):**
-- No visibility control (`pub`/private)
-- No namespacing - all symbols share global scope
-- No `mod` or `use` syntax
-- Must list all files explicitly on command line
+**Legacy multi-file CLI:**
+The CLI still accepts a list of files (`gruel build a.gruel b.gruel
+... -o out`). This is the pre-module flat-merge mode preserved for the
+spec / UI test runners. Files passed this way share one global
+namespace and DO collide on duplicate definitions. Treat this shape as
+legacy — new code should be a single entry file whose `@import` graph
+defines the compilation unit.
 
 ### Key Design Decisions
 
@@ -630,6 +641,20 @@ When all tests pass and the feature is complete:
       `crates/gruel-lsp/tests/spec_corpus_diagnostic_differential.rs` (wired into
       `make test`) fails the build if your spec or UI tests produce different
       diagnostics under the LSP than under `gruel check`.
+    - **Known architectural issue (ADR-0091):** the LSP enumerates every
+      `*.gruel` file under the workspace root and feeds them to the frontend as
+      one merged `CompilationUnit`. That matches the flat-multi-file model from
+      ADR-0023 but is *incompatible* with the module model from ADR-0026 the
+      moment a workspace contains more than one independent program — every
+      duplicate `fn main()` across `examples/`, `crates/gruel-spec/cases/`,
+      `scratch/`, etc. becomes a cascade of false duplicate-definition
+      diagnostics. The diagnostic differential test passes only because each
+      spec case is analyzed in isolation; opening this repo itself in an editor
+      surfaces thousands of bogus errors. Do not extend the current workspace
+      model further without a corrective ADR (entry-point-driven analysis
+      following `@import` transitively, or a manifest-driven set of compile
+      units). Cross-file goto / references / completion against `@import`-ed
+      modules are also not verified to work and should be treated as suspect.
 
 11. **Run `make test`** to verify all tests pass and traceability is maintained
 
