@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod code_actions;
 pub mod diagnostics;
 pub mod document;
+pub mod hover;
 pub mod position;
 pub mod server;
 pub mod workspace;

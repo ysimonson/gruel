@@ -745,7 +745,7 @@ pump.
   - Integration test: trigger a known-suggestion diagnostic, accept the
     fix, re-compile, assert no diagnostic.
 
-- [ ] **Phase 3: Hover (signatures + docstrings, no expression types
+- [x] **Phase 3: Hover (signatures + docstrings, no expression types
       yet)**
   - Add `SmallestSpanFinder` AST walker in `gruel-lsp`.
   - For top-level items (`fn`, `struct`, `enum`, `interface`, `const`),

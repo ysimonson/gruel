@@ -11,9 +11,10 @@ use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, PositionEncodingKind, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MarkupContent, MarkupKind, MessageType, PositionEncodingKind, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
@@ -324,6 +325,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -378,6 +380,51 @@ impl LanguageServer for Backend {
         if let Some(mut entry) = self.docs.get_mut(&params.text_document.uri) {
             entry.open = false;
         }
+    }
+
+    async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri.clone();
+        let position = params.text_document_position_params.position;
+        let encoding = *self.encoding.lock().await;
+
+        // Resolve the path → file_id via the current snapshot.
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
+
+        let hover = match crate::hover::hover_at(&snap.ast, &snap.interner, file_id, byte) {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+
+        let range = crate::position::span_to_range(line_map, &source.text, hover.span, encoding);
+
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: hover.markdown,
+            }),
+            range: Some(range),
+        }))
     }
 
     async fn code_action(
