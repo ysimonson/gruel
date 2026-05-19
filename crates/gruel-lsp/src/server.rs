@@ -15,12 +15,10 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
     MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
-
-#[allow(unused_imports)]
-use lsp_types as _lsp_used;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
@@ -337,6 +335,8 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                references_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -571,6 +571,113 @@ impl LanguageServer for Backend {
         }))
     }
 
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> jsonrpc::Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let position = params.text_document_position.position;
+        let include_decl = params.context.include_declaration;
+        let encoding = *self.encoding.lock().await;
+
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
+
+        let spans =
+            crate::references::references_at(&snap.ast, &snap.interner, file_id, byte, include_decl);
+
+        let mut locations = Vec::new();
+        for s in spans {
+            let src = match snap.sources.get(&s.file_id) {
+                Some(x) => x,
+                None => continue,
+            };
+            let lm = match snap.line_maps.get(&s.file_id) {
+                Some(m) => m,
+                None => continue,
+            };
+            let uri = match Url::from_file_path(&src.path) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            let range = crate::position::span_to_range(lm, &src.text, s, encoding);
+            locations.push(Location { uri, range });
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> jsonrpc::Result<Option<Vec<SymbolInformation>>> {
+        let encoding = *self.encoding.lock().await;
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let syms = crate::workspace_symbols::workspace_symbols(
+            &snap.ast,
+            &snap.interner,
+            &params.query,
+        );
+        let mut out: Vec<SymbolInformation> = Vec::new();
+        for sym in syms {
+            let src = match snap.sources.get(&sym.span.file_id) {
+                Some(x) => x,
+                None => continue,
+            };
+            let lm = match snap.line_maps.get(&sym.span.file_id) {
+                Some(m) => m,
+                None => continue,
+            };
+            let uri = match Url::from_file_path(&src.path) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            let range = crate::position::span_to_range(lm, &src.text, sym.span, encoding);
+            #[allow(deprecated)]
+            out.push(SymbolInformation {
+                name: sym.name,
+                kind: to_lsp_kind(sym.kind),
+                tags: None,
+                deprecated: None,
+                location: Location { uri, range },
+                container_name: sym.container,
+            });
+        }
+        if out.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(out))
+        }
+    }
+
     async fn code_action(
         &self,
         params: CodeActionParams,
@@ -620,6 +727,21 @@ pub async fn run_stdio_server(preview_features: PreviewFeatures) -> std::io::Res
         LspService::new(move |client| Backend::new(client, preview_features.clone()));
     Server::new(stdin, stdout, socket).serve(service).await;
     Ok(())
+}
+
+fn to_lsp_kind(k: crate::workspace_symbols::SymbolKind) -> LspSymbolKind {
+    use crate::workspace_symbols::SymbolKind as K;
+    match k {
+        K::Function => LspSymbolKind::FUNCTION,
+        K::Struct => LspSymbolKind::STRUCT,
+        K::Enum => LspSymbolKind::ENUM,
+        K::Interface => LspSymbolKind::INTERFACE,
+        K::Derive => LspSymbolKind::CLASS,
+        K::Constant => LspSymbolKind::CONSTANT,
+        K::Field => LspSymbolKind::FIELD,
+        K::EnumMember => LspSymbolKind::ENUM_MEMBER,
+        K::Method => LspSymbolKind::METHOD,
+    }
 }
 
 /// Synchronous entry point used by the binary subcommand (creates a tokio

@@ -12,8 +12,10 @@ pub mod document;
 pub mod goto;
 pub mod hover;
 pub mod position;
+pub mod references;
 pub mod server;
 pub mod signature;
 pub mod workspace;
+pub mod workspace_symbols;
 
 pub use server::{Backend, run_server, run_stdio_server};

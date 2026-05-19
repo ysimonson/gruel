@@ -769,10 +769,18 @@ pump.
     return the callee's parameter list with the active parameter index.
   - Integration tests across these four features.
 
-- [ ] **Phase 5: Find references + workspace symbols + multi-file
+- [x] **Phase 5: Find references + workspace symbols + multi-file
       diagnostics**
   - Add `ident_refs: HashMap<DefId, Vec<Span>>` side-table on
     `SemaOutput`, gated by the same `with_lsp_sidetables` flag.
+    (Implementation note: rather than adding a sema-level side
+    table, references are derived at query time by walking the
+    merged AST scoped to either the workspace — for top-level
+    items — or the enclosing function body — for params and let
+    bindings. This matches sema's flat global namespace rule
+    [[project_no_user_generics]] and avoids a separate definition
+    ID model. The same query-time approach is used for
+    `workspace/symbol`.)
   - `textDocument/references` returns all refs (optionally including
     the definition per the LSP `includeDeclaration` flag).
   - On `initialize`, walk the workspace; build the merged compilation
