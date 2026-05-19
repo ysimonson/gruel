@@ -41,6 +41,7 @@ pub use intern_pool::{
 };
 pub use layout::{DiscriminantStrategy, Layout, NicheRange, layout_of};
 pub use param_arena::{ParamArena, ParamRange};
+pub use sema::module_path::ModulePath;
 pub use sema::{
     AnalyzedFunction, ConstValue, FunctionInfo, GatherOutput, InterfaceVtables, MethodInfo, Sema,
     SemaOutput,

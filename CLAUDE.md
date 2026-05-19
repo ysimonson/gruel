@@ -641,20 +641,16 @@ When all tests pass and the feature is complete:
       `crates/gruel-lsp/tests/spec_corpus_diagnostic_differential.rs` (wired into
       `make test`) fails the build if your spec or UI tests produce different
       diagnostics under the LSP than under `gruel check`.
-    - **Known architectural issue (ADR-0091):** the LSP enumerates every
-      `*.gruel` file under the workspace root and feeds them to the frontend as
-      one merged `CompilationUnit`. That matches the flat-multi-file model from
-      ADR-0023 but is *incompatible* with the module model from ADR-0026 the
-      moment a workspace contains more than one independent program — every
-      duplicate `fn main()` across `examples/`, `crates/gruel-spec/cases/`,
-      `scratch/`, etc. becomes a cascade of false duplicate-definition
-      diagnostics. The diagnostic differential test passes only because each
-      spec case is analyzed in isolation; opening this repo itself in an editor
-      surfaces thousands of bogus errors. Do not extend the current workspace
-      model further without a corrective ADR (entry-point-driven analysis
-      following `@import` transitively, or a manifest-driven set of compile
-      units). Cross-file goto / references / completion against `@import`-ed
-      modules are also not verified to work and should be treated as suspect.
+    - **Per-root analysis (ADR-0091 Phase 8):** the LSP analyzes each open
+      document as its own root and only pulls in files transitively reachable
+      through that root's `@import` graph (see
+      `crates/gruel-lsp/src/workspace.rs::build_root_closure`). Two unrelated
+      `fn main()` files in the same workspace do *not* collide. Snapshots are
+      keyed by URI (`Backend.snapshots`); `workspace/symbol` and `textDocument/
+      references` walk every snapshot to union results across compilation
+      units. If you're adding a query handler: hover/goto/signature/completion/
+      inlay take the request URI and look up its snapshot via
+      `snapshot_for(&uri)`; workspace-wide queries iterate `all_snapshots()`.
 
 11. **Run `make test`** to verify all tests pass and traceability is maintained
 

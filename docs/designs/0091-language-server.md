@@ -578,23 +578,46 @@ binding is simply not pulled in.
 
 ### Multi-file / workspace
 
-The MVP (Phase 1) operates on the file the editor opened. Phase 5
-extends this:
+Each open editor buffer is its own compilation **root**. Under ADR-0026
+files are independent modules, so merging every `*.gruel` under the
+workspace would collapse them into a single global namespace and trip
+`merge_symbols`' duplicate-definition check the moment two unrelated
+programs both declared `fn main()` — which is exactly the shape this
+repo (and most non-trivial workspaces) takes. The LSP therefore
+analyzes each root in isolation:
 
-- On `initialize`, enumerate `*.gruel` under the workspace root,
-  excluding `.git`, `target`, and gitignored files (`ignore` crate).
-- The compile path always treats the workspace as a single
-  `CompilationUnit` — same as `gruel build a.gruel b.gruel c.gruel`.
-  Module resolution (`@import`) works because the file paths are
-  passed through.
-- Diagnostics from any file get published against that file's URI.
-- `workspace/symbol` walks the merged AST and emits a
-  `SymbolInformation` per top-level item.
+- On `initialize`, the server still discovers `*.gruel` under the
+  workspace root (`ignore::WalkBuilder`, excluding `.git`, `target`,
+  and gitignored files) — but only to seed the *candidate path list*
+  the `@import` resolver searches against. It is **not** a list of
+  files to compile.
+- For each open document, the analysis worker walks its parsed AST for
+  `@import("...")` paths (only `Item::Const` initializers — the
+  compiler's only valid `@import` site), resolves each through
+  [`gruel_air::ModulePath`] against the candidate list, loads the
+  resolved file's text (open buffer first, on-disk second), and
+  recurses. The fixpoint of that closure becomes the
+  `CompilationUnit`'s `sources`. Cycles terminate via a visited set.
+- Each root produces its own `Snapshot`, stored under its URI in
+  `Backend.snapshots: DashMap<Url, Arc<Snapshot>>`. Hover/goto/
+  signature/completion/inlay queries against URI `X` look up
+  `snapshots.get(X)` directly; if `X` isn't a root (e.g. a closed
+  file that some other root pulled in via `@import`) the lookup
+  falls back to any snapshot whose closure contains `X`.
+- Diagnostics from every root are deduped by (path, range, message,
+  code) before being published per file URI. That keeps a shared
+  imported file with one error from getting the same red squiggle
+  published twice when two open roots both import it.
+- `workspace/symbol` and `textDocument/references` walk every
+  snapshot and union the results (also deduped by location). This
+  picks up cross-unit references through `@import`-ed modules; the
+  old single-merged-AST model got those for free at the cost of
+  every-file-collides false errors.
 
-No project file (`gruel.toml`, etc.) is required at this stage; the
-workspace = "every `*.gruel` under root". Future package-manager work
-(ADR-0026 "Future Work") will introduce a manifest, at which point the
-LSP picks it up via a small `workspace.rs` change.
+No project file (`gruel.toml`, etc.) is required. If ADR-0026's future
+manifest work lands, `workspace.rs` can be extended to use it as the
+authoritative compile-unit list; until then "each open file is its own
+root, follow `@import`" is the actual policy.
 
 ### Performance budget
 
@@ -808,6 +831,40 @@ pump.
     (otherwise skip). Deferred — no responsiveness gap measured yet.
   - Stabilisation: removed the `LanguageServer` preview gate. The
     server now starts via `gruel lsp` with no flags.
+
+- [x] **Phase 8 (post-stabilisation): per-root analysis to match the
+      ADR-0026 module model**
+  - Originally Phases 1–7 treated the workspace as one
+    `CompilationUnit` (the pre-ADR-0026 flat-merge model). That broke
+    the moment a workspace contained more than one independent program:
+    every duplicate `fn main()` across `examples/`, `scratch/`,
+    `crates/gruel-spec/cases/`, etc. became a duplicate-definition
+    error. The diagnostic differential test masked the issue because
+    each spec case is analyzed in isolation.
+  - Fix: each open document is now its own analysis root. The worker
+    walks the root's AST for `@import("...")` paths (only
+    `Item::Const` initializers — the only valid `@import` site), uses
+    `gruel_air::ModulePath` to resolve them against the workspace's
+    candidate file list, loads each resolved file (open buffer first,
+    disk second), and recurses. The fixpoint of that closure becomes
+    the unit's `sources`.
+  - Snapshots are now per-URI (`Backend.snapshots: DashMap<Url,
+    Arc<Snapshot>>`). Hover/goto/signature/completion/inlay handlers
+    look up by the queried URI; `workspace/symbol` and
+    `textDocument/references` walk every snapshot and union the
+    results (deduped by location).
+  - A new
+    `compile_frontend_from_ast_with_file_paths(.., file_paths)` entry
+    point in `gruel-compiler` plumbs the closure's `file_id → path`
+    map into sema so `@import` resolution can find sibling files
+    inside the unit. Without this the parsing-only LSP path produced
+    spurious `ModuleNotFound` for every legitimate import.
+  - `crates/gruel-air/src/sema/module_path.rs` is now `pub mod` and
+    `ModulePath` is re-exported from `gruel_air` so the LSP can share
+    the same resolution rules the compiler uses internally.
+  - `compute_import_closure` and `build_root_closure` live in
+    `crates/gruel-lsp/src/workspace.rs`; the worker's per-root flow
+    is in `analysis::analyze_root`.
 
 ## Consequences
 

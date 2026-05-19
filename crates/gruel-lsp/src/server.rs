@@ -4,9 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use gruel_compiler::{FileId, PreviewFeatures};
+use gruel_compiler::PreviewFeatures;
 use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
@@ -20,6 +19,7 @@ use lsp_types::{
     SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
     TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
@@ -29,7 +29,6 @@ use crate::analysis::{self, Snapshot, WorkspaceFile};
 use crate::diagnostics;
 use crate::document::DocState;
 use crate::position::PositionEncoding;
-use crate::workspace::enumerate_gruel_files;
 
 /// Default debounce duration between the last keystroke and the next compile.
 const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -40,7 +39,12 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Backend {
     pub client: Client,
     pub docs: Arc<DashMap<Url, DocState>>,
-    pub snapshot: Arc<ArcSwap<Option<Snapshot>>>,
+    /// Per-root compile snapshot, keyed by the open document's URI. Each
+    /// open file is analyzed independently — its `@import` closure (the
+    /// root plus every file transitively reachable through `@import`)
+    /// becomes the compilation unit, so unrelated workspace files are
+    /// never merged together. See [`crate::workspace::build_root_closure`].
+    pub snapshots: Arc<DashMap<Url, Arc<Snapshot>>>,
     pub preview_features: PreviewFeatures,
     pub workspace_root: Arc<Mutex<Option<PathBuf>>>,
     pub encoding: Arc<Mutex<PositionEncoding>>,
@@ -65,7 +69,7 @@ impl Backend {
         let me = Self {
             client: client.clone(),
             docs: Arc::new(DashMap::new()),
-            snapshot: Arc::new(ArcSwap::from_pointee(None)),
+            snapshots: Arc::new(DashMap::new()),
             preview_features,
             workspace_root: Arc::new(Mutex::new(None)),
             encoding: Arc::new(Mutex::new(PositionEncoding::Utf16)),
@@ -77,7 +81,7 @@ impl Backend {
         let worker = AnalysisWorker {
             client,
             docs: me.docs.clone(),
-            snapshot: me.snapshot.clone(),
+            snapshots: me.snapshots.clone(),
             preview_features: me.preview_features.clone(),
             workspace_root: me.workspace_root.clone(),
             encoding: me.encoding.clone(),
@@ -98,38 +102,135 @@ impl Backend {
         });
     }
 
-    /// Test-only: compile the workspace synchronously and publish diagnostics.
-    /// Bypasses the debounce / spawned worker so integration tests can poll a
-    /// deterministic result.
+    /// Test-only: compile each open root synchronously and publish
+    /// diagnostics. Bypasses the debounce / spawned worker so integration
+    /// tests can poll a deterministic result.
     pub async fn analyze_now(&self) -> Vec<Diagnostic> {
-        let files = gather_workspace_files(
-            &self.docs,
-            self.workspace_root.lock().await.clone().as_deref(),
-        );
-        let result = analysis::analyze(&files, &self.preview_features, &Target::host());
-        let root = self.workspace_root.lock().await.clone();
-        let by_file = diagnostics::group_by_file(result.diagnostics.into_iter(), root.as_deref());
-        let mut flat = Vec::new();
-        for (path, diags) in &by_file {
-            if let Ok(uri) = Url::from_file_path(path) {
-                self.client
-                    .publish_diagnostics(uri.clone(), diags.clone(), None)
-                    .await;
-                self.last_diagnostics.insert(uri, diags.clone());
+        let workspace_root = self.workspace_root.lock().await.clone();
+        let target = Target::host();
+        let mut combined_diagnostics: FxHashSet<UriDiagKey> = FxHashSet::default();
+        let mut by_uri: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+
+        for (uri, root) in collect_roots(&self.docs) {
+            let docs = self.docs.clone();
+            let result = analysis::analyze_root(
+                root,
+                workspace_root.as_deref(),
+                &self.preview_features,
+                &target,
+                |path| open_text_lookup(&docs, path),
+            );
+            if let Some(snap) = result.snapshot {
+                self.snapshots.insert(uri.clone(), Arc::new(snap));
             }
-            flat.extend(diags.clone());
+            let by_file = diagnostics::group_by_file(
+                result.diagnostics.into_iter(),
+                workspace_root.as_deref(),
+            );
+            for (path, diags) in by_file {
+                if let Ok(diag_uri) = Url::from_file_path(&path) {
+                    for d in &diags {
+                        let key = (
+                            diag_uri.clone(),
+                            range_key(&d.range),
+                            d.message.clone(),
+                            d.code
+                                .as_ref()
+                                .map(|c| match c {
+                                    lsp_types::NumberOrString::String(s) => s.clone(),
+                                    lsp_types::NumberOrString::Number(n) => n.to_string(),
+                                })
+                                .unwrap_or_default(),
+                        );
+                        if combined_diagnostics.insert(key) {
+                            by_uri.entry(diag_uri.clone()).or_default().push(d.clone());
+                        }
+                    }
+                }
+            }
         }
-        if let Some(snap) = result.snapshot {
-            self.snapshot.store(Arc::new(Some(snap)));
+
+        let mut flat = Vec::new();
+        for (uri, diags) in by_uri {
+            self.client
+                .publish_diagnostics(uri.clone(), diags.clone(), None)
+                .await;
+            self.last_diagnostics.insert(uri, diags.clone());
+            flat.extend(diags);
         }
         flat
+    }
+}
+
+fn collect_roots(docs: &DashMap<Url, DocState>) -> Vec<(Url, WorkspaceFile)> {
+    docs.iter()
+        .enumerate()
+        .map(|(idx, kv)| {
+            let doc = kv.value();
+            let file = WorkspaceFile {
+                path: doc.path.clone(),
+                text: doc.text.clone(),
+                file_id: gruel_compiler::FileId::new((idx as u32).saturating_add(1).max(1)),
+            };
+            (kv.key().clone(), file)
+        })
+        .collect()
+}
+
+/// Compact, `Hash`-able view of an `lsp_types::Range`. `lsp_types::Range`
+/// itself doesn't implement `Hash`, so we serialize it to a tuple before
+/// using it as a dedup key.
+type RangeKey = (u32, u32, u32, u32);
+
+/// Dedup key for diagnostics keyed by URI: (uri, range, message, code).
+type UriDiagKey = (Url, RangeKey, String, String);
+
+/// Dedup key for diagnostics keyed by path: (path, range, message, code).
+type PathDiagKey = (PathBuf, RangeKey, String, String);
+
+fn range_key(r: &lsp_types::Range) -> RangeKey {
+    (r.start.line, r.start.character, r.end.line, r.end.character)
+}
+
+fn open_text_lookup(docs: &DashMap<Url, DocState>, path: &std::path::Path) -> Option<String> {
+    for kv in docs.iter() {
+        if kv.value().path == path {
+            return Some(kv.value().text.clone());
+        }
+    }
+    None
+}
+
+impl Backend {
+    /// Return the snapshot for queries against `uri`. If the queried URI is
+    /// open, prefer its own per-root snapshot; otherwise (e.g. a file that's
+    /// only seen as an `@import` target) fall back to any snapshot whose
+    /// closure contains the path. Returns `None` if no snapshot covers the
+    /// file yet.
+    fn snapshot_for(&self, uri: &Url) -> Option<Arc<Snapshot>> {
+        if let Some(snap) = self.snapshots.get(uri) {
+            return Some(snap.value().clone());
+        }
+        let path = uri.to_file_path().ok()?;
+        for kv in self.snapshots.iter() {
+            if kv.value().path_to_file_id.contains_key(&path) {
+                return Some(kv.value().clone());
+            }
+        }
+        None
+    }
+
+    /// Return every snapshot, used by workspace-wide queries
+    /// (workspace symbols, references). Each entry is unique by root URI.
+    fn all_snapshots(&self) -> Vec<Arc<Snapshot>> {
+        self.snapshots.iter().map(|kv| kv.value().clone()).collect()
     }
 }
 
 struct AnalysisWorker {
     client: Client,
     docs: Arc<DashMap<Url, DocState>>,
-    snapshot: Arc<ArcSwap<Option<Snapshot>>>,
+    snapshots: Arc<DashMap<Url, Arc<Snapshot>>>,
     preview_features: PreviewFeatures,
     workspace_root: Arc<Mutex<Option<PathBuf>>>,
     /// Currently negotiated position encoding. Used by later phases when
@@ -168,28 +269,71 @@ impl AnalysisWorker {
                 }
             }
 
-            let files = gather_workspace_files(
-                &self.docs,
-                self.workspace_root.lock().await.clone().as_deref(),
-            );
+            let workspace_root = self.workspace_root.lock().await.clone();
+            let roots = collect_roots(&self.docs);
             let preview_features = self.preview_features.clone();
             let target = self.target.clone();
+            let docs_for_lookup = self.docs.clone();
+            let workspace_root_for_task = workspace_root.clone();
 
             // Run sema on a blocking thread (sema is sync + CPU-heavy).
+            //
+            // Each open root produces its own `@import` closure; we dedupe
+            // diagnostics across roots so a shared imported file with an
+            // error doesn't get the same red squiggle published twice.
             let analysis = tokio::task::spawn_blocking(move || {
-                analysis::analyze(&files, &preview_features, &target)
+                let mut snapshots: Vec<(Url, Snapshot)> = Vec::new();
+                let mut all_by_file: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+                let mut seen_keys: FxHashSet<PathDiagKey> = FxHashSet::default();
+
+                for (uri, root) in roots {
+                    let result = analysis::analyze_root(
+                        root,
+                        workspace_root_for_task.as_deref(),
+                        &preview_features,
+                        &target,
+                        |path| open_text_lookup(&docs_for_lookup, path),
+                    );
+                    if let Some(snap) = result.snapshot {
+                        snapshots.push((uri, snap));
+                    }
+                    let by_file = diagnostics::group_by_file(
+                        result.diagnostics.into_iter(),
+                        workspace_root_for_task.as_deref(),
+                    );
+                    for (path, diags) in by_file {
+                        for d in diags {
+                            let key = (
+                                path.clone(),
+                                range_key(&d.range),
+                                d.message.clone(),
+                                d.code
+                                    .as_ref()
+                                    .map(|c| match c {
+                                        lsp_types::NumberOrString::String(s) => s.clone(),
+                                        lsp_types::NumberOrString::Number(n) => n.to_string(),
+                                    })
+                                    .unwrap_or_default(),
+                            );
+                            if seen_keys.insert(key) {
+                                all_by_file.entry(path.clone()).or_default().push(d);
+                            }
+                        }
+                    }
+                }
+                (snapshots, all_by_file)
             });
-            let result = tokio::select! {
+            let (snapshots, by_file) = tokio::select! {
                 res = analysis => match res {
                     Ok(r) => r,
                     Err(_) => continue,
                 },
                 _ = tokio::time::sleep(timeout) => {
-                    // Timed out — drop result, keep previous snapshot.
+                    // Timed out — drop result, keep previous snapshots.
                     self.client
                         .log_message(
                             MessageType::WARNING,
-                            "gruel-lsp: compile timed out, keeping previous snapshot",
+                            "gruel-lsp: compile timed out, keeping previous snapshots",
                         )
                         .await;
                     continue;
@@ -197,10 +341,22 @@ impl AnalysisWorker {
                 _ = token.cancelled() => continue,
             };
 
-            // Publish diagnostics.
-            let root = self.workspace_root.lock().await.clone();
-            let by_file =
-                diagnostics::group_by_file(result.diagnostics.into_iter(), root.as_deref());
+            // Drop snapshots for docs that are no longer open.
+            let open_uris: FxHashSet<Url> = self.docs.iter().map(|kv| kv.key().clone()).collect();
+            let stale_snapshot_uris: Vec<Url> = self
+                .snapshots
+                .iter()
+                .filter(|kv| !open_uris.contains(kv.key()))
+                .map(|kv| kv.key().clone())
+                .collect();
+            for uri in stale_snapshot_uris {
+                self.snapshots.remove(&uri);
+            }
+
+            // Install the new snapshots.
+            for (uri, snap) in snapshots {
+                self.snapshots.insert(uri, Arc::new(snap));
+            }
 
             // Clear stale files: any URI we previously published for but
             // doesn't appear in by_file now must be cleared.
@@ -210,7 +366,6 @@ impl AnalysisWorker {
                     current_files.insert(uri);
                 }
             }
-            // Snapshot the published_files set for safe iteration.
             let previously_published: Vec<Url> = self
                 .published_files
                 .iter()
@@ -247,52 +402,8 @@ impl AnalysisWorker {
                     self.last_diagnostics.insert(uri, diags);
                 }
             }
-
-            if let Some(snap) = result.snapshot {
-                self.snapshot.store(Arc::new(Some(snap)));
-            }
         }
     }
-}
-
-fn gather_workspace_files(
-    docs: &DashMap<Url, DocState>,
-    workspace_root: Option<&std::path::Path>,
-) -> Vec<WorkspaceFile> {
-    let mut files = Vec::new();
-    let mut seen_paths = std::collections::HashSet::new();
-    let mut next_id: u32 = 1;
-
-    // Open buffers take precedence.
-    for kv in docs.iter() {
-        let doc = kv.value();
-        files.push(WorkspaceFile {
-            path: doc.path.clone(),
-            text: doc.text.clone(),
-            file_id: FileId::new(next_id),
-        });
-        seen_paths.insert(doc.path.clone());
-        next_id += 1;
-    }
-
-    // Fall back to disk for files we haven't been notified about.
-    if let Some(root) = workspace_root {
-        for path in enumerate_gruel_files(root) {
-            if seen_paths.contains(&path) {
-                continue;
-            }
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                files.push(WorkspaceFile {
-                    path: path.clone(),
-                    text,
-                    file_id: FileId::new(next_id),
-                });
-                next_id += 1;
-            }
-        }
-    }
-
-    files
 }
 
 #[tower_lsp::async_trait]
@@ -400,8 +511,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        // Keep state but mark closed.
-        if let Some(mut entry) = self.docs.get_mut(&params.text_document.uri) {
+        let uri = params.text_document.uri;
+        // Once a doc is closed it stops being a root: drop its dedicated
+        // snapshot. The next analysis pass also clears any stale roots, but
+        // doing it eagerly keeps queries from racing into a snapshot the
+        // editor no longer cares about.
+        self.snapshots.remove(&uri);
+        if let Some(mut entry) = self.docs.get_mut(&uri) {
             entry.open = false;
         }
     }
@@ -416,8 +532,7 @@ impl LanguageServer for Backend {
         let encoding = *self.encoding.lock().await;
 
         // Resolve the path → file_id via the current snapshot.
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
+        let snap = match self.snapshot_for(&uri) {
             Some(s) => s,
             None => return Ok(None),
         };
@@ -474,8 +589,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let encoding = *self.encoding.lock().await;
 
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
+        let snap = match self.snapshot_for(&uri) {
             Some(s) => s,
             None => return Ok(None),
         };
@@ -538,8 +652,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let encoding = *self.encoding.lock().await;
 
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
+        let snap = match self.snapshot_for(&uri) {
             Some(s) => s,
             None => return Ok(None),
         };
@@ -594,53 +707,54 @@ impl LanguageServer for Backend {
         let include_decl = params.context.include_declaration;
         let encoding = *self.encoding.lock().await;
 
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-        let path = match uri.to_file_path() {
+        let target_path = match uri.to_file_path() {
             Ok(p) => p,
             Err(_) => return Ok(None),
         };
-        let file_id = match snap.path_to_file_id.get(&path) {
-            Some(id) => *id,
-            None => return Ok(None),
-        };
-        let source = match snap.sources.get(&file_id) {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-        let line_map = match snap.line_maps.get(&file_id) {
-            Some(m) => m,
-            None => return Ok(None),
-        };
-        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
 
-        let spans = crate::references::references_at(
-            &snap.ast,
-            &snap.interner,
-            file_id,
-            byte,
-            include_decl,
-        );
-
+        // References can span multiple compilation units (e.g. a function in
+        // a shared `utils.gruel` is called by two different open roots). Walk
+        // every snapshot whose closure contains the target file, run the
+        // per-snapshot query, and union the results, deduping by location.
         let mut locations = Vec::new();
-        for s in spans {
-            let src = match snap.sources.get(&s.file_id) {
-                Some(x) => x,
-                None => continue,
+        let mut seen: FxHashSet<(Url, RangeKey)> = FxHashSet::default();
+        for snap in self.all_snapshots() {
+            let Some(&file_id) = snap.path_to_file_id.get(&target_path) else {
+                continue;
             };
-            let lm = match snap.line_maps.get(&s.file_id) {
-                Some(m) => m,
-                None => continue,
+            let Some(source) = snap.sources.get(&file_id) else {
+                continue;
             };
-            let uri = match Url::from_file_path(&src.path) {
-                Ok(u) => u,
-                Err(_) => continue,
+            let Some(line_map) = snap.line_maps.get(&file_id) else {
+                continue;
             };
-            let range = crate::position::span_to_range(lm, &src.text, s, encoding);
-            locations.push(Location { uri, range });
+            let byte =
+                crate::position::position_to_byte(line_map, &source.text, position, encoding);
+            let spans = crate::references::references_at(
+                &snap.ast,
+                &snap.interner,
+                file_id,
+                byte,
+                include_decl,
+            );
+            for s in spans {
+                let Some(src) = snap.sources.get(&s.file_id) else {
+                    continue;
+                };
+                let Some(lm) = snap.line_maps.get(&s.file_id) else {
+                    continue;
+                };
+                let Ok(loc_uri) = Url::from_file_path(&src.path) else {
+                    continue;
+                };
+                let range = crate::position::span_to_range(lm, &src.text, s, encoding);
+                if seen.insert((loc_uri.clone(), range_key(&range))) {
+                    locations.push(Location {
+                        uri: loc_uri,
+                        range,
+                    });
+                }
+            }
         }
 
         if locations.is_empty() {
@@ -655,37 +769,44 @@ impl LanguageServer for Backend {
         params: WorkspaceSymbolParams,
     ) -> jsonrpc::Result<Option<Vec<SymbolInformation>>> {
         let encoding = *self.encoding.lock().await;
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-        let syms =
-            crate::workspace_symbols::workspace_symbols(&snap.ast, &snap.interner, &params.query);
+        // Workspace symbols span every open root: walk each per-root snapshot,
+        // dedupe by definition location so a function imported by two
+        // different roots doesn't get listed twice.
         let mut out: Vec<SymbolInformation> = Vec::new();
-        for sym in syms {
-            let src = match snap.sources.get(&sym.span.file_id) {
-                Some(x) => x,
-                None => continue,
-            };
-            let lm = match snap.line_maps.get(&sym.span.file_id) {
-                Some(m) => m,
-                None => continue,
-            };
-            let uri = match Url::from_file_path(&src.path) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-            let range = crate::position::span_to_range(lm, &src.text, sym.span, encoding);
-            #[allow(deprecated)]
-            out.push(SymbolInformation {
-                name: sym.name,
-                kind: to_lsp_kind(sym.kind),
-                tags: None,
-                deprecated: None,
-                location: Location { uri, range },
-                container_name: sym.container,
-            });
+        let mut seen: FxHashSet<(Url, RangeKey, String)> = FxHashSet::default();
+        for snap in self.all_snapshots() {
+            let syms = crate::workspace_symbols::workspace_symbols(
+                &snap.ast,
+                &snap.interner,
+                &params.query,
+            );
+            for sym in syms {
+                let src = match snap.sources.get(&sym.span.file_id) {
+                    Some(x) => x,
+                    None => continue,
+                };
+                let lm = match snap.line_maps.get(&sym.span.file_id) {
+                    Some(m) => m,
+                    None => continue,
+                };
+                let uri = match Url::from_file_path(&src.path) {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+                let range = crate::position::span_to_range(lm, &src.text, sym.span, encoding);
+                if !seen.insert((uri.clone(), range_key(&range), sym.name.clone())) {
+                    continue;
+                }
+                #[allow(deprecated)]
+                out.push(SymbolInformation {
+                    name: sym.name,
+                    kind: to_lsp_kind(sym.kind),
+                    tags: None,
+                    deprecated: None,
+                    location: Location { uri, range },
+                    container_name: sym.container,
+                });
+            }
         }
         if out.is_empty() {
             Ok(None)
@@ -707,8 +828,7 @@ impl LanguageServer for Backend {
             .and_then(|c| c.trigger_character.as_ref())
             .and_then(|s| s.chars().next());
 
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
+        let snap = match self.snapshot_for(&uri) {
             Some(s) => s,
             None => return Ok(None),
         };
@@ -752,8 +872,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.clone();
         let encoding = *self.encoding.lock().await;
 
-        let snap_guard = self.snapshot.load();
-        let snap = match snap_guard.as_ref().as_ref() {
+        let snap = match self.snapshot_for(&uri) {
             Some(s) => s,
             None => return Ok(None),
         };
