@@ -9,6 +9,7 @@ use dashmap::DashMap;
 use gruel_compiler::{FileId, PreviewFeatures};
 use gruel_target::Target;
 use lsp_types::{
+    CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, InitializeResult,
     InitializedParams, MessageType, PositionEncodingKind, ServerCapabilities, ServerInfo,
@@ -40,6 +41,11 @@ pub struct Backend {
     pub encoding: Arc<Mutex<PositionEncoding>>,
     pub analysis_tx: UnboundedSender<AnalysisRequest>,
     pub current_cancel: Arc<Mutex<Option<CancellationToken>>>,
+    /// Most recent diagnostics keyed by URI. Updated atomically by the
+    /// analysis worker on every successful (or partial) compile. Read by
+    /// `textDocument/codeAction` to construct quick fixes for the
+    /// diagnostics overlapping a requested range.
+    pub last_diagnostics: Arc<DashMap<Url, Vec<Diagnostic>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +66,7 @@ impl Backend {
             encoding: Arc::new(Mutex::new(PositionEncoding::Utf16)),
             analysis_tx: tx,
             current_cancel: Arc::new(Mutex::new(None)),
+            last_diagnostics: Arc::new(DashMap::new()),
         };
         // Spawn the analysis worker.
         let worker = AnalysisWorker {
@@ -73,6 +80,7 @@ impl Backend {
             rx,
             target: Target::host(),
             published_files: DashMap::new(),
+            last_diagnostics: me.last_diagnostics.clone(),
         };
         tokio::spawn(worker.run());
         me
@@ -101,8 +109,9 @@ impl Backend {
         for (path, diags) in &by_file {
             if let Ok(uri) = Url::from_file_path(path) {
                 self.client
-                    .publish_diagnostics(uri, diags.clone(), None)
+                    .publish_diagnostics(uri.clone(), diags.clone(), None)
                     .await;
+                self.last_diagnostics.insert(uri, diags.clone());
             }
             flat.extend(diags.clone());
         }
@@ -130,6 +139,8 @@ struct AnalysisWorker {
     /// Track which files we've previously published diagnostics for so we
     /// can clear stale red squiggles when a file no longer has any.
     published_files: DashMap<Url, ()>,
+    /// Shared mirror of the most recent diagnostics per URI (Phase 2).
+    last_diagnostics: Arc<DashMap<Url, Vec<Diagnostic>>>,
 }
 
 impl AnalysisWorker {
@@ -203,6 +214,7 @@ impl AnalysisWorker {
                 if !current_files.contains(&uri) {
                     self.client.publish_diagnostics(uri.clone(), vec![], None).await;
                     self.published_files.remove(&uri);
+                    self.last_diagnostics.remove(&uri);
                 }
             }
             // Also clear for any open doc that isn't in by_file (e.g. fixed
@@ -212,15 +224,17 @@ impl AnalysisWorker {
                 if !current_files.contains(&uri) {
                     self.client.publish_diagnostics(uri.clone(), vec![], None).await;
                     self.published_files.remove(&uri);
+                    self.last_diagnostics.remove(&uri);
                 }
             }
 
             for (path, diags) in by_file {
                 if let Ok(uri) = Url::from_file_path(&path) {
                     self.client
-                        .publish_diagnostics(uri.clone(), diags, None)
+                        .publish_diagnostics(uri.clone(), diags.clone(), None)
                         .await;
-                    self.published_files.insert(uri, ());
+                    self.published_files.insert(uri.clone(), ());
+                    self.last_diagnostics.insert(uri, diags);
                 }
             }
 
@@ -309,6 +323,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -362,6 +377,33 @@ impl LanguageServer for Backend {
         // Keep state but mark closed.
         if let Some(mut entry) = self.docs.get_mut(&params.text_document.uri) {
             entry.open = false;
+        }
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> jsonrpc::Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri.clone();
+        let range = params.range;
+        let encoding = *self.encoding.lock().await;
+        let workspace_root = self.workspace_root.lock().await.clone();
+        let diagnostics = self
+            .last_diagnostics
+            .get(&uri)
+            .map(|d| d.clone())
+            .unwrap_or_default();
+        let actions: Vec<CodeActionOrCommand> = crate::code_actions::code_actions_for_range(
+            &diagnostics,
+            range,
+            &self.docs,
+            encoding,
+            workspace_root.as_deref(),
+        );
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
         }
     }
 }

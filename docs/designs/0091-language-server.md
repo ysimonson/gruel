@@ -737,7 +737,7 @@ pump.
     while the in-process LSP backend is also using it; assert both
     produce identical results and the cache survives.
 
-- [ ] **Phase 2: Code actions for diagnostic suggestions**
+- [x] **Phase 2: Code actions for diagnostic suggestions**
   - Carry `JsonSuggestion[]` on the LSP `Diagnostic.data` field.
   - Implement `textDocument/codeAction` to convert suggestions into
     `CodeAction { kind: QuickFix, edit: WorkspaceEdit }`.

@@ -6,6 +6,7 @@
 //! and the mapping from Gruel `JsonDiagnostic` values to LSP types.
 
 pub mod analysis;
+pub mod code_actions;
 pub mod diagnostics;
 pub mod document;
 pub mod position;
