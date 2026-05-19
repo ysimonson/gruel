@@ -788,7 +788,7 @@ pump.
   - `workspace/symbol` from top-level items.
   - Integration tests with two-file workspaces.
 
-- [ ] **Phase 6: Completion + inlay hints**
+- [x] **Phase 6: Completion + inlay hints**
   - Completion (Phase 4 scope) wired up.
   - Inlay hints for inferred-type `let` bindings and unnamed call args.
   - Integration tests for trigger-character completion, member access

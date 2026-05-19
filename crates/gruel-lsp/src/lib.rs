@@ -7,10 +7,12 @@
 
 pub mod analysis;
 pub mod code_actions;
+pub mod completion;
 pub mod diagnostics;
 pub mod document;
 pub mod goto;
 pub mod hover;
+pub mod inlay_hints;
 pub mod position;
 pub mod references;
 pub mod server;

@@ -10,13 +10,15 @@ use gruel_compiler::{FileId, PreviewFeatures};
 use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
-    MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
-    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
+    InitializeParams, InitializeResult, InitializedParams, InlayHint, InlayHintKind,
+    InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind, MessageType, OneOf,
+    ParameterInformation, ParameterLabel, PositionEncodingKind, ReferenceParams,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
     TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
 use tokio::sync::Mutex;
@@ -337,6 +339,19 @@ impl LanguageServer for Backend {
                 }),
                 references_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![
+                        ".".to_string(),
+                        "@".to_string(),
+                        ":".to_string(),
+                        "(".to_string(),
+                    ]),
+                    all_commit_characters: None,
+                    work_done_progress_options: Default::default(),
+                    completion_item: None,
+                }),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -678,6 +693,123 @@ impl LanguageServer for Backend {
         }
     }
 
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> jsonrpc::Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let position = params.text_document_position.position;
+        let encoding = *self.encoding.lock().await;
+        let trigger = params
+            .context
+            .as_ref()
+            .and_then(|c| c.trigger_character.as_ref())
+            .and_then(|s| s.chars().next());
+
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
+
+        let items = crate::completion::complete_at(&snap.ast, &snap.interner, file_id, byte, trigger);
+        let lsp_items: Vec<CompletionItem> = items
+            .into_iter()
+            .map(|i| CompletionItem {
+                label: i.label,
+                kind: Some(to_completion_kind(i.kind)),
+                detail: i.detail,
+                ..CompletionItem::default()
+            })
+            .collect();
+        if lsp_items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(CompletionResponse::Array(lsp_items)))
+        }
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri.clone();
+        let encoding = *self.encoding.lock().await;
+
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+
+        let hints = crate::inlay_hints::inlay_hints(
+            &snap.ast,
+            &snap.interner,
+            &snap.expr_types,
+            snap.type_pool.as_deref(),
+            file_id,
+        );
+
+        let lsp_hints: Vec<InlayHint> = hints
+            .into_iter()
+            .filter(|h| h.file_id == file_id)
+            .map(|h| {
+                let pos = crate::position::byte_to_position(line_map, &source.text, h.byte, encoding);
+                InlayHint {
+                    position: pos,
+                    label: InlayHintLabel::String(h.label),
+                    kind: Some(match h.kind {
+                        crate::inlay_hints::InlayKind::Type => InlayHintKind::TYPE,
+                        crate::inlay_hints::InlayKind::Parameter => InlayHintKind::PARAMETER,
+                    }),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                }
+            })
+            .collect();
+        if lsp_hints.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(lsp_hints))
+        }
+    }
+
     async fn code_action(
         &self,
         params: CodeActionParams,
@@ -741,6 +873,24 @@ fn to_lsp_kind(k: crate::workspace_symbols::SymbolKind) -> LspSymbolKind {
         K::Field => LspSymbolKind::FIELD,
         K::EnumMember => LspSymbolKind::ENUM_MEMBER,
         K::Method => LspSymbolKind::METHOD,
+    }
+}
+
+fn to_completion_kind(k: crate::completion::CompletionKind) -> CompletionItemKind {
+    use crate::completion::CompletionKind as K;
+    match k {
+        K::Function => CompletionItemKind::FUNCTION,
+        K::Struct => CompletionItemKind::STRUCT,
+        K::Enum => CompletionItemKind::ENUM,
+        K::Interface => CompletionItemKind::INTERFACE,
+        K::Derive => CompletionItemKind::CLASS,
+        K::Constant => CompletionItemKind::CONSTANT,
+        K::Field => CompletionItemKind::FIELD,
+        K::EnumMember => CompletionItemKind::ENUM_MEMBER,
+        K::Variable => CompletionItemKind::VARIABLE,
+        K::Method => CompletionItemKind::METHOD,
+        K::Keyword => CompletionItemKind::KEYWORD,
+        K::Intrinsic => CompletionItemKind::FUNCTION,
     }
 }
 
