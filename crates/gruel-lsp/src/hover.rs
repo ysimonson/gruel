@@ -9,12 +9,14 @@
 //! references). Hover for arbitrary expressions / locals lands in Phase 4
 //! when sema's expr-type side-table is wired up.
 
+use gruel_compiler::{Type, TypeInternPool};
 use gruel_parser::ast::{
     Ast, ConstDecl, DeriveDecl, EnumDecl, EnumVariant, EnumVariantKind, FieldDecl, Function,
     Ident, InterfaceDecl, Item, LinkExternBlock, Method, MethodSig, Param, StructDecl, TypeExpr,
 };
 use gruel_util::Span;
 use lasso::ThreadedRodeo;
+use rustc_hash::FxHashMap;
 
 /// Hover content rendered to Markdown (plus the AST node's span for the
 /// returned LSP `Hover.range` field).
@@ -37,6 +39,43 @@ pub fn hover_at(
 ) -> Option<HoverContent> {
     let target = SmallestSpanFinder::new(file_id, byte).find(ast)?;
     target.render(interner)
+}
+
+/// Like [`hover_at`], but also consults the AIR expression-type side
+/// table. If the cursor is inside an expression whose type sema computed,
+/// we return the type as fallback hover content (Phase 4).
+pub fn hover_at_with_expr_types(
+    ast: &Ast,
+    interner: &ThreadedRodeo,
+    expr_types: &FxHashMap<Span, Type>,
+    type_pool: Option<&TypeInternPool>,
+    file_id: gruel_util::FileId,
+    byte: u32,
+) -> Option<HoverContent> {
+    if let Some(content) = hover_at(ast, interner, file_id, byte) {
+        return Some(content);
+    }
+    // Fall back to the smallest span in `expr_types` covering `byte`.
+    let mut best: Option<(Span, Type)> = None;
+    for (span, ty) in expr_types {
+        if span.file_id != file_id {
+            continue;
+        }
+        if byte < span.start || byte >= span.end {
+            continue;
+        }
+        if best.map_or(true, |(b, _)| span.end - span.start < b.end - b.start) {
+            best = Some((*span, *ty));
+        }
+    }
+    let (span, ty) = best?;
+    let display = type_pool
+        .map(|p| p.format_type_name(ty))
+        .unwrap_or_else(|| format!("{:?}", ty));
+    Some(HoverContent {
+        markdown: format!("```gruel\n{}\n```", display),
+        span,
+    })
 }
 
 /// Visitor that finds the smallest AST node whose span contains a target

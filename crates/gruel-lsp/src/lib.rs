@@ -9,9 +9,11 @@ pub mod analysis;
 pub mod code_actions;
 pub mod diagnostics;
 pub mod document;
+pub mod goto;
 pub mod hover;
 pub mod position;
 pub mod server;
+pub mod signature;
 pub mod workspace;
 
 pub use server::{Backend, run_server, run_stdio_server};

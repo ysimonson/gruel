@@ -755,11 +755,14 @@ pump.
     string.
   - Tests for each kind of item.
 
-- [ ] **Phase 4: Expression types, hover for locals, goto-definition,
+- [x] **Phase 4: Expression types, hover for locals, goto-definition,
       signature help**
   - Add `expr_types: HashMap<Span, Type>` side-table on `SemaOutput`,
     populated via a `with_lsp_sidetables(true)` builder bit so normal
-    compile paths still skip the cost.
+    compile paths still skip the cost. (Implementation note:
+    populated post-analysis by walking `AnalyzedFunction.air` —
+    `AirInst` already carries both `span` and `ty`, so no Sema
+    instrumentation is needed. The cost lives on the LSP path only.)
   - Hover for arbitrary expressions: read the side-table.
   - `textDocument/definition`: span → ident → defining span.
   - `textDocument/signatureHelp`: when cursor is inside a call,

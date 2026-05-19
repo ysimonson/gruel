@@ -11,11 +11,16 @@ use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MarkupContent, MarkupKind, MessageType, PositionEncodingKind, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
+    MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
+
+#[allow(unused_imports)]
+use lsp_types as _lsp_used;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
@@ -326,6 +331,12 @@ impl LanguageServer for Backend {
                 )),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -411,7 +422,14 @@ impl LanguageServer for Backend {
         };
         let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
 
-        let hover = match crate::hover::hover_at(&snap.ast, &snap.interner, file_id, byte) {
+        let hover = match crate::hover::hover_at_with_expr_types(
+            &snap.ast,
+            &snap.interner,
+            &snap.expr_types,
+            snap.type_pool.as_deref(),
+            file_id,
+            byte,
+        ) {
             Some(h) => h,
             None => return Ok(None),
         };
@@ -424,6 +442,132 @@ impl LanguageServer for Backend {
                 value: hover.markdown,
             }),
             range: Some(range),
+        }))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri.clone();
+        let position = params.text_document_position_params.position;
+        let encoding = *self.encoding.lock().await;
+
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
+
+        let def_span = match crate::goto::definition_at(&snap.ast, &snap.interner, file_id, byte) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // Resolve def_span back to (uri, range). It must live in some file we
+        // know about.
+        let def_file_id = def_span.file_id;
+        let def_source = match snap.sources.get(&def_file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let def_line_map = match snap.line_maps.get(&def_file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let def_uri = match Url::from_file_path(&def_source.path) {
+            Ok(u) => u,
+            Err(_) => return Ok(None),
+        };
+        let range = crate::position::span_to_range(
+            def_line_map,
+            &def_source.text,
+            def_span,
+            encoding,
+        );
+
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri: def_uri,
+            range,
+        })))
+    }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> jsonrpc::Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri.clone();
+        let position = params.text_document_position_params.position;
+        let encoding = *self.encoding.lock().await;
+
+        let snap_guard = self.snapshot.load();
+        let snap = match snap_guard.as_ref().as_ref() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        let file_id = match snap.path_to_file_id.get(&path) {
+            Some(id) => *id,
+            None => return Ok(None),
+        };
+        let source = match snap.sources.get(&file_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let line_map = match snap.line_maps.get(&file_id) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let byte = crate::position::position_to_byte(line_map, &source.text, position, encoding);
+
+        let result = match crate::signature::signature_help(
+            &snap.ast,
+            &snap.interner,
+            file_id,
+            byte,
+        ) {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let parameters = result
+            .parameters
+            .iter()
+            .map(|(s, e)| ParameterInformation {
+                label: ParameterLabel::LabelOffsets([*s, *e]),
+                documentation: None,
+            })
+            .collect();
+
+        Ok(Some(SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label: result.label,
+                documentation: None,
+                parameters: Some(parameters),
+                active_parameter: Some(result.active_parameter as u32),
+            }],
+            active_signature: Some(0),
+            active_parameter: Some(result.active_parameter as u32),
         }))
     }
 

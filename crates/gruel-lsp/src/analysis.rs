@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use gruel_compiler::{
     FileId, JsonDiagnostic, MultiFileJsonFormatter, PreviewFeatures, SourceFile, SourceInfo,
-    compile_frontend_from_ast_with_options_full_target, merge_symbols,
+    Type, TypeInternPool, compile_frontend_from_ast_with_options_full_target, merge_symbols,
     parse_all_files_with_preview,
 };
 use gruel_parser::ast::Ast;
 use gruel_target::Target;
+use gruel_util::Span;
 use rustc_hash::FxHashMap;
 
 use crate::position::LineMap;
@@ -47,6 +48,13 @@ pub struct Snapshot {
     pub path_to_file_id: FxHashMap<PathBuf, FileId>,
     /// Line maps for each open file.
     pub line_maps: FxHashMap<FileId, LineMap>,
+    /// Type intern pool from sema. Owned so `format_type_name` works for
+    /// hover queries.
+    pub type_pool: Option<Arc<TypeInternPool>>,
+    /// Phase 4 side-table: span → result type for every AIR instruction
+    /// produced during sema. Built post-analysis by walking
+    /// `AnalyzedFunction.air` so we don't have to instrument sema.
+    pub expr_types: FxHashMap<Span, Type>,
 }
 
 /// Result of one compile pass.
@@ -144,13 +152,33 @@ pub fn analyze(
     }
 
     let interner_for_snapshot = Arc::new(state.interner);
+    let type_pool = Arc::new(state.type_pool);
+
+    // Build expr_types side-table by walking each function's AIR.
+    let mut expr_types: FxHashMap<Span, Type> = FxHashMap::default();
+    for f in &state.functions {
+        for (_air_ref, inst) in f.analyzed.air.iter() {
+            // Skip Span::default() / unknown spans — they belong to synthesized
+            // instructions (e.g. drop glue) with no source location.
+            if inst.span.start == 0 && inst.span.end == 0 {
+                continue;
+            }
+            // Don't overwrite a narrower entry with a wider one — earlier
+            // instructions are typically more specific. We dedupe on (span,
+            // type) so the value is deterministic regardless of insertion
+            // order.
+            expr_types.entry(inst.span).or_insert(inst.ty);
+        }
+    }
 
     AnalysisResult {
         diagnostics,
-        snapshot: Some(build_snapshot(
+        snapshot: Some(build_snapshot_full(
             files,
             ast_for_snapshot,
             interner_for_snapshot,
+            Some(type_pool),
+            expr_types,
         )),
     }
 }
@@ -177,6 +205,16 @@ fn build_snapshot(
     ast: Ast,
     interner: Arc<lasso::ThreadedRodeo>,
 ) -> Snapshot {
+    build_snapshot_full(files, ast, interner, None, FxHashMap::default())
+}
+
+fn build_snapshot_full(
+    files: &[WorkspaceFile],
+    ast: Ast,
+    interner: Arc<lasso::ThreadedRodeo>,
+    type_pool: Option<Arc<TypeInternPool>>,
+    expr_types: FxHashMap<Span, Type>,
+) -> Snapshot {
     let mut sources: FxHashMap<FileId, WorkspaceFile> = FxHashMap::default();
     let mut path_to_file_id: FxHashMap<PathBuf, FileId> = FxHashMap::default();
     let mut line_maps: FxHashMap<FileId, LineMap> = FxHashMap::default();
@@ -191,6 +229,8 @@ fn build_snapshot(
         sources,
         path_to_file_id,
         line_maps,
+        type_pool,
+        expr_types,
     }
 }
 
