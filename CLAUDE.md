@@ -613,7 +613,24 @@ When all tests pass and the feature is complete:
    `make test`) fails the build if the tree-sitter and chumsky parsers disagree on
    acceptance for any spec or UI test case.
 
-10. **Run `make test`** to verify all tests pass and traceability is maintained
+10. **Check `gruel-lsp` impact** (applies once ADR-0091 ships; skip until then).
+    The LSP is a thin façade over `gruel-compiler`'s public API, so most language
+    changes propagate automatically:
+    - **Auto-synced — no LSP code change:** new diagnostic codes (flow via
+      `JsonDiagnostic`), new intrinsics (ADR-0050 registry — read by hover), new
+      doc-bearing items (`Doc` field — read by hover and completion), and any new
+      syntax/types whose AST nodes route through existing visitors.
+    - **Explicit LSP changes required:** new AST node *kinds* (extend
+      `SmallestSpanFinder` and hover dispatch — exhaustive matches surface missing
+      arms at compile time), new keywords (add to completion's keyword shortlist),
+      new preview features (decide whether the LSP entry point should also gate
+      them).
+    - The diagnostic differential in
+      `crates/gruel-lsp/tests/spec_corpus_diagnostic_differential.rs` (wired into
+      `make test`) fails the build if your spec or UI tests produce different
+      diagnostics under the LSP than under `gruel check`.
+
+11. **Run `make test`** to verify all tests pass and traceability is maintained
 
 ### Doc comments and `gruel doc`
 
