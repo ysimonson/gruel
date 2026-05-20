@@ -555,7 +555,7 @@ rather than ambient drift.
     and a `lib` package (asserts the rendered output mentions
     `manifest.name` in the page title).
 
-- [ ] **Phase 3: Open-buffer overlay in `gruel-compiler`**
+- [x] **Phase 3: Open-buffer overlay in `gruel-compiler`**
   - Add an `import_overlay: Option<Arc<dyn Fn(&Path) -> Option<String>
     + Send + Sync>>` option (name TBD; could be a small trait if
     `dyn Fn` ergonomics get ugly) on the public compile entry points

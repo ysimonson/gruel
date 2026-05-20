@@ -27,10 +27,15 @@
 
 mod diagnostic;
 mod drop_glue;
+mod import_overlay;
 mod link;
 mod parse_cache;
 mod prelude_source;
 mod unit;
+
+pub use import_overlay::{
+    ImportLoadError, ImportOverlay, LoadedFile, load_import_closure, loaded_files_as_view,
+};
 
 pub use prelude_source::{
     ResolvedPrelude, ResolvedPreludeFile, embedded_prelude, resolved_prelude,
