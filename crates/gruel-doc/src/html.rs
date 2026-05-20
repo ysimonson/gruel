@@ -74,7 +74,13 @@ pub fn render_index_html_with(file: &DocFile, table: &LinkTable) -> String {
 
 /// Render the top-level site index listing every file.
 pub fn render_site_index_html(files: &[DocFile]) -> String {
-    let mut body = String::from("<h1>Documentation</h1>\n<ul>\n");
+    render_site_index_html_with_title(files, "Documentation")
+}
+
+/// Render the top-level site index with a custom page title (ADR-0092:
+/// `gruel doc` uses the manifest `name` here when one is present).
+pub fn render_site_index_html_with_title(files: &[DocFile], title: &str) -> String {
+    let mut body = format!("<h1>{}</h1>\n<ul>\n", escape_html(title));
     for f in files {
         body.push_str(&format!(
             "  <li><a href=\"{stem}/index.html\">{stem}</a></li>\n",
@@ -82,7 +88,7 @@ pub fn render_site_index_html(files: &[DocFile]) -> String {
         ));
     }
     body.push_str("</ul>\n");
-    wrap("Documentation", "", &[], "", &body)
+    wrap(title, "", &[], "", &body)
 }
 
 fn markdown_to_html(md: &str) -> String {

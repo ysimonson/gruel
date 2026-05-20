@@ -376,6 +376,11 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// `gruel.json` package manifest (ADR-0092). Gates the manifest-driven
+    /// CLI behaviour and LSP analysis mode. The isolation-mode LSP fix
+    /// is intentionally *not* gated — it ships unconditionally as the
+    /// no-manifest default; only the manifested behaviour is preview.
+    PackageManifest,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -407,6 +412,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::PackageManifest => "ADR-0092",
         }
     }
 
@@ -2179,7 +2185,15 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, package_manifest");
+    }
+
+    #[test]
+    fn test_preview_feature_package_manifest() {
+        let feature: PreviewFeature = "package_manifest".parse().unwrap();
+        assert_eq!(feature, PreviewFeature::PackageManifest);
+        assert_eq!(feature.name(), "package_manifest");
+        assert_eq!(feature.adr(), "ADR-0092");
     }
 
     // ========================================================================

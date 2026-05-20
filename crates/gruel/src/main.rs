@@ -229,7 +229,15 @@ fn run_doc(opts: &DocOpts) {
         site.push(file);
     }
 
-    if let Err(e) = write_doc_site(&site, &out_dir, opts.format) {
+    // ADR-0092: when invoked through a manifest, title the rendered doc
+    // site after the package name; otherwise keep the historical
+    // "Documentation" label.
+    let title = opts
+        .package_name
+        .clone()
+        .unwrap_or_else(|| "Documentation".to_string());
+
+    if let Err(e) = write_doc_site(&site, &out_dir, opts.format, &title) {
         eprintln!("error writing docs: {}", e);
         std::process::exit(1);
     }
@@ -244,21 +252,23 @@ fn write_doc_site(
     site: &gruel_doc::DocSite,
     out_dir: &std::path::Path,
     format: DocFormat,
+    title: &str,
 ) -> std::io::Result<()> {
     match format {
-        DocFormat::Markdown => write_doc_site_markdown(site, out_dir),
-        DocFormat::Html => write_doc_site_html(site, out_dir),
+        DocFormat::Markdown => write_doc_site_markdown(site, out_dir, title),
+        DocFormat::Html => write_doc_site_html(site, out_dir, title),
     }
 }
 
 fn write_doc_site_markdown(
     site: &gruel_doc::DocSite,
     out_dir: &std::path::Path,
+    title: &str,
 ) -> std::io::Result<()> {
     use gruel_doc::markdown::{render_index_with, render_markdown_with};
 
     // Top-level index.md links each file's index.
-    let mut index = String::from("# Documentation\n\n");
+    let mut index = format!("# {}\n\n", title);
     for file in &site.files {
         index.push_str(&format!("- [{stem}]({stem}/index.md)\n", stem = file.stem));
     }
@@ -282,12 +292,15 @@ fn write_doc_site_markdown(
 fn write_doc_site_html(
     site: &gruel_doc::DocSite,
     out_dir: &std::path::Path,
+    title: &str,
 ) -> std::io::Result<()> {
-    use gruel_doc::html::{render_html_with, render_index_html_with, render_site_index_html};
+    use gruel_doc::html::{
+        render_html_with, render_index_html_with, render_site_index_html_with_title,
+    };
 
     std::fs::write(
         out_dir.join("index.html"),
-        render_site_index_html(&site.files),
+        render_site_index_html_with_title(&site.files, title),
     )?;
     for file in &site.files {
         let table = file.link_table();
@@ -695,6 +708,9 @@ struct DocOpts {
     format: DocFormat,
     output_dir: String,
     preview_features: PreviewFeatures,
+    /// ADR-0092: when a manifest drove resolution, this is the manifest
+    /// `name`. Used to title the rendered doc site.
+    package_name: Option<String>,
 }
 
 /// Resolved options for `gruel emit`.
@@ -773,15 +789,203 @@ fn resolve_linker(linker: Option<String>) -> LinkerMode {
     }
 }
 
+/// ADR-0092: subcommand that resolved a manifest.
+#[derive(Debug, Clone, Copy)]
+enum ManifestSubcommand {
+    Build,
+    Run,
+    Check,
+    Doc,
+}
+
+impl ManifestSubcommand {
+    fn label(&self) -> &'static str {
+        match self {
+            ManifestSubcommand::Build => "build",
+            ManifestSubcommand::Run => "run",
+            ManifestSubcommand::Check => "check",
+            ManifestSubcommand::Doc => "doc",
+        }
+    }
+}
+
+/// ADR-0092: a successful manifest classification of the first positional.
+#[derive(Debug)]
+struct ManifestResolution {
+    /// Path of the entry `.gruel` file, fully resolved.
+    root: String,
+    /// Manifest's package name (used as the default `-o` for build).
+    package_name: String,
+}
+
+/// Classify the first positional into one of three branches (ADR-0092).
+/// Returns:
+/// - `Ok(None)` if no positional is present (caller should discover upward).
+/// - `Ok(Some(Source))` if the first positional is a `.gruel` file
+///   (caller hands `sources` through unchanged).
+/// - `Ok(Some(Manifest))` if the first positional names a manifest or its
+///   directory (caller must reject extra positionals).
+/// - `Err` for anything else (non-existent, unsupported extension).
+enum FirstPositional {
+    None,
+    Source,
+    ManifestFile,
+    ManifestDir,
+}
+
+fn classify_first_positional(sources: &[String]) -> Result<FirstPositional, String> {
+    let Some(first) = sources.first() else {
+        return Ok(FirstPositional::None);
+    };
+
+    let path = std::path::Path::new(first);
+
+    if path.extension().and_then(|s| s.to_str()) == Some("gruel") {
+        return Ok(FirstPositional::Source);
+    }
+
+    if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some("gruel.json") {
+        return Ok(FirstPositional::ManifestFile);
+    }
+
+    if path.is_dir() {
+        return Ok(FirstPositional::ManifestDir);
+    }
+
+    Err(format!(
+        "Error: unsupported source '{}': expected *.gruel, gruel.json, or a directory containing one",
+        first
+    ))
+}
+
+fn apply_manifest(
+    subcommand: ManifestSubcommand,
+    manifest_path: &std::path::Path,
+) -> Result<ManifestResolution, String> {
+    let manifest = gruel_manifest::load_at(manifest_path).map_err(|err| err.to_string())?;
+    let is_library = manifest.target.is_library();
+
+    if is_library && matches!(subcommand, ManifestSubcommand::Build | ManifestSubcommand::Run) {
+        return Err(format!(
+            "Error: package '{}' is a library (no 'bin' in gruel.json); cannot {}. \
+             Use 'gruel check' or pass an explicit source file.",
+            manifest.name,
+            subcommand.label(),
+        ));
+    }
+
+    Ok(ManifestResolution {
+        root: manifest.target.root().to_string_lossy().into_owned(),
+        package_name: manifest.name,
+    })
+}
+
+/// ADR-0092: classify positionals and (when applicable) load a manifest.
+///
+/// Returns:
+/// - `Ok(None)` if the first positional is a `.gruel` file — caller carries
+///   the existing single/multi-file path forward.
+/// - `Ok(Some(_))` if discovery / explicit-path classification resolved to
+///   a manifest. The caller must use the manifest's root as the entry file
+///   and reject any extra positionals.
+/// - `Err` on classification or load failure (already-formatted message).
+///
+/// `preview_features` gates the entire manifest pathway behind
+/// `--preview package_manifest`. Without the flag, "no source" stays the
+/// existing error message and explicit `gruel.json`/directory arguments
+/// fall through to the "unsupported source" branch.
+fn resolve_manifest(
+    subcommand: ManifestSubcommand,
+    sources: &[String],
+    preview_features: &PreviewFeatures,
+) -> Result<Option<ManifestResolution>, String> {
+    let preview_on = preview_features.contains(&PreviewFeature::PackageManifest);
+
+    match classify_first_positional(sources)? {
+        FirstPositional::Source => Ok(None),
+        FirstPositional::None => {
+            if !preview_on {
+                return Err("Error: No source file specified".to_string());
+            }
+            let cwd = std::env::current_dir().map_err(|e| {
+                format!("Error: failed to read current directory: {}", e)
+            })?;
+            let manifest_path = gruel_manifest::discover_upward(&cwd).ok_or_else(|| {
+                "Error: no source file specified and no gruel.json found in current or any ancestor directory"
+                    .to_string()
+            })?;
+            Ok(Some(apply_manifest(subcommand, &manifest_path)?))
+        }
+        FirstPositional::ManifestFile => {
+            if !preview_on {
+                return Err(format!(
+                    "Error: unsupported source '{}': expected *.gruel, gruel.json, or a directory containing one",
+                    sources[0]
+                ));
+            }
+            if sources.len() > 1 {
+                return Err(format!(
+                    "Error: manifest-based invocation accepts only one positional; got {}",
+                    sources.len()
+                ));
+            }
+            let path = std::path::PathBuf::from(&sources[0]);
+            Ok(Some(apply_manifest(subcommand, &path)?))
+        }
+        FirstPositional::ManifestDir => {
+            if !preview_on {
+                return Err(format!(
+                    "Error: unsupported source '{}': expected *.gruel, gruel.json, or a directory containing one",
+                    sources[0]
+                ));
+            }
+            if sources.len() > 1 {
+                return Err(format!(
+                    "Error: manifest-based invocation accepts only one positional; got {}",
+                    sources.len()
+                ));
+            }
+            let candidate = std::path::Path::new(&sources[0]).join("gruel.json");
+            if !candidate.is_file() {
+                return Err(format!("Error: no gruel.json found at {}", sources[0]));
+            }
+            Ok(Some(apply_manifest(subcommand, &candidate)?))
+        }
+    }
+}
+
 fn resolve_build(args: BuildArgs) -> Result<BuildOpts, String> {
     let opt_level = resolve_opt_level(args.opt_level, args.debug, args.release);
     let linker = resolve_linker(args.linker);
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
 
-    // Determine source paths and output path. Mirrors the legacy
-    // single-binary CLI: with `-o`, all positionals are sources; without
-    // `-o`, one positional is "source + default a.out", two positionals
-    // are "source + output", three+ is an error.
+    // ADR-0092: classify the first positional. If it resolves to a
+    // manifest, use the manifest's root as the entry and the manifest's
+    // name as the default `-o` (when `-o` is omitted).
+    if let Some(manifest) =
+        resolve_manifest(ManifestSubcommand::Build, &args.sources, &preview_features)?
+    {
+        let output_path = args.output.unwrap_or_else(|| manifest.package_name.clone());
+        return Ok(BuildOpts {
+            source_paths: vec![manifest.root],
+            output_path,
+            target: args.target,
+            linker,
+            opt_level,
+            jobs: args.jobs,
+            preview_features,
+            capture_comptime_dbg: args.capture_comptime_dbg,
+            time_passes: args.time_passes,
+            benchmark_json: args.benchmark_json,
+            cache_dir: args.cache_dir,
+            no_cache: args.no_cache,
+        });
+    }
+
+    // Existing single/multi-file behaviour for `.gruel` positionals.
+    // Mirrors the legacy single-binary CLI: with `-o`, all positionals
+    // are sources; without `-o`, one positional is "source + default
+    // a.out", two positionals are "source + output", three+ is an error.
     let (source_paths, output_path) = if let Some(out) = args.output {
         if args.sources.is_empty() {
             return Err("Error: No source file specified".to_string());
@@ -823,14 +1027,26 @@ fn resolve_build(args: BuildArgs) -> Result<BuildOpts, String> {
 }
 
 fn resolve_run(args: RunArgs) -> Result<RunOpts, String> {
-    if args.sources.is_empty() {
-        return Err("Error: No source file specified".to_string());
-    }
     let opt_level = resolve_opt_level(args.opt_level, args.debug, args.release);
     let linker = resolve_linker(args.linker);
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+
+    let source_paths = match resolve_manifest(
+        ManifestSubcommand::Run,
+        &args.sources,
+        &preview_features,
+    )? {
+        Some(manifest) => vec![manifest.root],
+        None => {
+            if args.sources.is_empty() {
+                return Err("Error: No source file specified".to_string());
+            }
+            args.sources
+        }
+    };
+
     Ok(RunOpts {
-        source_paths: args.sources,
+        source_paths,
         program_args: args.program_args,
         target: args.target,
         linker,
@@ -845,12 +1061,24 @@ fn resolve_run(args: RunArgs) -> Result<RunOpts, String> {
 }
 
 fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
-    if args.sources.is_empty() {
-        return Err("Error: No source file specified".to_string());
-    }
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+
+    let source_paths = match resolve_manifest(
+        ManifestSubcommand::Check,
+        &args.sources,
+        &preview_features,
+    )? {
+        Some(manifest) => vec![manifest.root],
+        None => {
+            if args.sources.is_empty() {
+                return Err("Error: No source file specified".to_string());
+            }
+            args.sources
+        }
+    };
+
     Ok(CheckOpts {
-        source_paths: args.sources,
+        source_paths,
         target: args.target,
         preview_features,
         capture_comptime_dbg: args.capture_comptime_dbg,
@@ -860,15 +1088,28 @@ fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
 }
 
 fn resolve_doc(args: DocArgs) -> Result<DocOpts, String> {
-    if args.sources.is_empty() {
-        return Err("Error: No source file specified".to_string());
-    }
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
+
+    let (source_paths, package_name) = match resolve_manifest(
+        ManifestSubcommand::Doc,
+        &args.sources,
+        &preview_features,
+    )? {
+        Some(manifest) => (vec![manifest.root], Some(manifest.package_name)),
+        None => {
+            if args.sources.is_empty() {
+                return Err("Error: No source file specified".to_string());
+            }
+            (args.sources, None)
+        }
+    };
+
     Ok(DocOpts {
-        source_paths: args.sources,
+        source_paths,
         format: args.format,
         output_dir: args.output_dir,
         preview_features,
+        package_name,
     })
 }
 
@@ -2866,5 +3107,68 @@ mod tests {
     #[test]
     fn parse_unknown_short_option() {
         assert!(is_error(&parse_build_from(&["-x", "source.gruel"])));
+    }
+
+    // ========== ADR-0092: package manifest CLI ==========
+
+    fn previews_with(features: &[PreviewFeature]) -> PreviewFeatures {
+        features.iter().copied().collect()
+    }
+
+    #[test]
+    fn classify_dot_gruel_is_source() {
+        let cases = vec!["foo.gruel".to_string()];
+        assert!(matches!(
+            classify_first_positional(&cases).unwrap(),
+            FirstPositional::Source
+        ));
+    }
+
+    #[test]
+    fn classify_empty_is_none() {
+        let cases: Vec<String> = vec![];
+        assert!(matches!(
+            classify_first_positional(&cases).unwrap(),
+            FirstPositional::None
+        ));
+    }
+
+    #[test]
+    fn classify_unsupported_is_error() {
+        let cases = vec!["foo.txt".to_string()];
+        assert!(classify_first_positional(&cases).is_err());
+    }
+
+    #[test]
+    fn resolve_manifest_empty_no_preview_errors() {
+        let err = resolve_manifest(
+            ManifestSubcommand::Build,
+            &[],
+            &PreviewFeatures::default(),
+        )
+        .unwrap_err();
+        assert!(err.contains("No source file specified"));
+    }
+
+    #[test]
+    fn resolve_manifest_dot_gruel_passes_through() {
+        let result = resolve_manifest(
+            ManifestSubcommand::Build,
+            &["src.gruel".to_string()],
+            &previews_with(&[PreviewFeature::PackageManifest]),
+        )
+        .unwrap();
+        assert!(result.is_none(), "*.gruel should be Source, not manifest");
+    }
+
+    #[test]
+    fn resolve_manifest_unsupported_extension_errors() {
+        let err = resolve_manifest(
+            ManifestSubcommand::Build,
+            &["src.txt".to_string()],
+            &previews_with(&[PreviewFeature::PackageManifest]),
+        )
+        .unwrap_err();
+        assert!(err.contains("unsupported source"));
     }
 }

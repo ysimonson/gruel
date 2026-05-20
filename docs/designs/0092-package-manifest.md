@@ -526,7 +526,7 @@ rather than ambient drift.
     `deny_unknown_fields`.
   - Unit tests for happy path and each validation error.
 
-- [ ] **Phase 2: Preview gate + CLI integration**
+- [x] **Phase 2: Preview gate + CLI integration**
   - Add `PreviewFeature::PackageManifest` (snake_case `package_manifest`)
     to `gruel-util::error`; update `name()`, `adr()`, `all()`, and the
     `FromStr` impl.
