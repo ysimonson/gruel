@@ -75,7 +75,7 @@ tree-sitter-differential:
 lsp-diagnostic-differential:
 	$(TIMEOUT) cargo test -p gruel-lsp \
 		--test spec_corpus_diagnostic_differential \
-		-- --nocapture --test-threads=1
+		-- --nocapture --ignored
 
 # Format all Rust files.
 fmt:

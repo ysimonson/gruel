@@ -48,7 +48,7 @@ mod info;
 mod intrinsics;
 mod known_symbols;
 mod lang_items;
-mod module_path;
+pub mod module_path;
 mod output;
 mod pointer_ops;
 mod sema_ctx_builder;

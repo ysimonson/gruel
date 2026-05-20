@@ -948,6 +948,30 @@ pub fn compile_frontend_from_ast_with_options_full_target(
     suppress_comptime_dbg_print: bool,
     target: &Target,
 ) -> MultiErrorResult<CompileState> {
+    compile_frontend_from_ast_with_file_paths(
+        ast,
+        interner,
+        preview_features,
+        suppress_comptime_dbg_print,
+        target,
+        rustc_hash::FxHashMap::default(),
+    )
+}
+
+/// Full-control variant: like
+/// [`compile_frontend_from_ast_with_options_full_target`] but additionally
+/// threads a `file_id → path` map into sema so `@import("...")` resolution
+/// can find sibling modules. The LSP needs this on the per-root compile path
+/// — `parse_all_files_with_preview` doesn't populate sema's `file_paths` map
+/// on its own.
+pub fn compile_frontend_from_ast_with_file_paths(
+    ast: Ast,
+    interner: ThreadedRodeo,
+    preview_features: &PreviewFeatures,
+    suppress_comptime_dbg_print: bool,
+    target: &Target,
+    file_paths: rustc_hash::FxHashMap<FileId, String>,
+) -> MultiErrorResult<CompileState> {
     // AST to RIR (untyped IR)
     let (rir, interner) = {
         let _span = info_span!("astgen").entered();
@@ -963,6 +987,7 @@ pub fn compile_frontend_from_ast_with_options_full_target(
         let mut sema = Sema::new(&rir, &interner, preview_features.clone());
         sema.set_suppress_comptime_dbg_print(suppress_comptime_dbg_print);
         sema.set_target(target.clone());
+        sema.set_file_paths(file_paths);
         let output = sema.analyze_all()?;
         info!(
             function_count = output.functions.len(),

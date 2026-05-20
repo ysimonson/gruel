@@ -1,15 +1,19 @@
 //! Compile analysis worker (ADR-0091).
 //!
-//! Given a snapshot of the workspace's source files (open buffers + on-disk
-//! fallback), compile through the frontend and return per-file diagnostics
-//! plus a successful `Snapshot` when possible.
+//! The LSP runs one frontend compile per open root: the root is one open
+//! editor buffer, and its compilation unit is the root plus every file
+//! transitively reachable through `@import("...")` (open buffers preferred
+//! over disk). Unrelated workspace files are never merged together — that
+//! avoids the cascade of duplicate-`fn main()` diagnostics that the old
+//! whole-workspace-as-one-unit model produced the moment a workspace held
+//! more than one program.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gruel_compiler::{
     FileId, JsonDiagnostic, MultiFileJsonFormatter, PreviewFeatures, SourceFile, SourceInfo, Type,
-    TypeInternPool, compile_frontend_from_ast_with_options_full_target, merge_symbols,
+    TypeInternPool, compile_frontend_from_ast_with_file_paths, merge_symbols,
     parse_all_files_with_preview, prepend_prelude,
 };
 use gruel_parser::ast::Ast;
@@ -18,6 +22,7 @@ use gruel_util::Span;
 use rustc_hash::FxHashMap;
 
 use crate::position::LineMap;
+use crate::workspace::build_root_closure;
 
 /// One source file the worker can see (either an open editor buffer or a
 /// file on disk).
@@ -61,6 +66,24 @@ pub struct Snapshot {
 pub struct AnalysisResult {
     pub diagnostics: Vec<JsonDiagnostic>,
     pub snapshot: Option<Snapshot>,
+}
+
+/// Analyze a single root file plus its transitively-`@import`-reachable
+/// closure. Builds the closure (open-buffer text wins over disk), runs the
+/// frontend, and returns per-file diagnostics with an optional `Snapshot`
+/// when sema completed.
+pub fn analyze_root<F>(
+    root: WorkspaceFile,
+    workspace_root: Option<&Path>,
+    preview_features: &PreviewFeatures,
+    target: &Target,
+    open_text: F,
+) -> AnalysisResult
+where
+    F: FnMut(&Path) -> Option<String>,
+{
+    let closure = build_root_closure(root, workspace_root, preview_features, open_text);
+    analyze(&closure, preview_features, target)
 }
 
 /// Compile the given workspace files via the frontend and return
@@ -144,12 +167,20 @@ pub fn analyze(
         };
     let ast_for_snapshot = ast_with_prelude.clone();
 
-    let state = match compile_frontend_from_ast_with_options_full_target(
+    // Pass file_paths so sema's @import resolver can find the closure's
+    // siblings. Without this, every `@import("foo.gruel")` would fail with
+    // ModuleNotFound even though we just parsed `foo.gruel` for the unit.
+    let file_paths: FxHashMap<FileId, String> = files
+        .iter()
+        .map(|f| (f.file_id, f.path.to_string_lossy().into_owned()))
+        .collect();
+    let state = match compile_frontend_from_ast_with_file_paths(
         ast_with_prelude,
         interner_with_prelude,
         preview_features,
         true, // suppress comptime @dbg print
         target,
+        file_paths,
     ) {
         Ok(state) => state,
         Err(errors) => {
