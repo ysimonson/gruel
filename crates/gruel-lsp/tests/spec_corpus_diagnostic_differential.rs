@@ -23,6 +23,7 @@ use gruel_compiler::{
 use gruel_lsp::analysis::{WorkspaceFile, analyze};
 use gruel_target::Target;
 use gruel_test_runner::{Case, load_test_files};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct NormalizedDiag {
@@ -127,16 +128,22 @@ fn normalize(d: &gruel_compiler::JsonDiagnostic) -> NormalizedDiag {
     }
 }
 
+// Slow: ~10 minutes serial on a developer laptop, ~2-5 minutes parallel on
+// CI. Gated behind `#[ignore]` so `cargo test --tests` (and `make
+// quick-test`) skips it; the dedicated `make lsp-diagnostic-differential`
+// target runs it via `cargo test -- --ignored`.
 #[test]
+#[ignore = "expensive: 2k+ spec cases × 2 full compiles each"]
 fn lsp_and_cli_diagnostics_agree_on_spec_corpus() {
-    // Some sema paths recurse deeply for comptime; run the body on a
-    // thread with a larger stack to avoid spurious overflow.
-    let handle = std::thread::Builder::new()
-        .name("diag-differential".to_string())
+    // Some sema paths recurse deeply for comptime; build a dedicated rayon
+    // pool whose workers each get a 16 MiB stack so per-case compilation
+    // can't blow it.
+    let pool = rayon::ThreadPoolBuilder::new()
         .stack_size(16 * 1024 * 1024)
-        .spawn(run_differential)
-        .expect("spawn differential thread");
-    handle.join().expect("differential thread panicked");
+        .thread_name(|i| format!("diag-differential-{}", i))
+        .build()
+        .expect("build rayon pool");
+    pool.install(run_differential);
 }
 
 fn run_differential() {
@@ -181,17 +188,20 @@ fn run_differential() {
         .collect();
 
     let total = cases.len();
-    let mut disagreements = Vec::new();
-
-    for case in &cases {
-        let cli = cli_diagnostics(case);
-        let lsp = lsp_diagnostics(case);
-        if cli != lsp {
-            let extra_in_cli: Vec<_> = cli.difference(&lsp).cloned().collect();
-            let extra_in_lsp: Vec<_> = lsp.difference(&cli).cloned().collect();
-            disagreements.push((case.name.clone(), extra_in_cli, extra_in_lsp));
-        }
-    }
+    let disagreements: Vec<_> = cases
+        .par_iter()
+        .filter_map(|case| {
+            let cli = cli_diagnostics(case);
+            let lsp = lsp_diagnostics(case);
+            if cli != lsp {
+                let extra_in_cli: Vec<_> = cli.difference(&lsp).cloned().collect();
+                let extra_in_lsp: Vec<_> = lsp.difference(&cli).cloned().collect();
+                Some((case.name.clone(), extra_in_cli, extra_in_lsp))
+            } else {
+                None
+            }
+        })
+        .collect();
 
     if !disagreements.is_empty() {
         let mut msg = format!(
