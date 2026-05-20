@@ -515,7 +515,7 @@ rather than ambient drift.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Manifest crate**
+- [x] **Phase 1: Manifest crate**
   - New `crates/gruel-manifest` workspace member. Adds `serde`,
     `serde_json`, `semver`, `thiserror` deps (first time `semver`
     enters the tree; small, focused crate).
