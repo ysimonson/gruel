@@ -6,14 +6,16 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use gruel_compiler::PreviewFeatures;
+use gruel_manifest::Manifest;
 use gruel_target::Target;
 use lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind,
+    Diagnostic, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InlayHint,
+    InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind,
     MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
     ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
     SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
@@ -47,6 +49,11 @@ pub struct Backend {
     pub snapshots: Arc<DashMap<Url, Arc<Snapshot>>>,
     pub preview_features: PreviewFeatures,
     pub workspace_root: Arc<Mutex<Option<PathBuf>>>,
+    /// ADR-0092: loaded `gruel.json` for the workspace root, when one
+    /// exists and `package_manifest` preview is enabled. `None` falls
+    /// back to per-open-buffer isolation mode (the no-manifest default,
+    /// unconditional on the LSP side).
+    pub manifest: Arc<Mutex<Option<Manifest>>>,
     pub encoding: Arc<Mutex<PositionEncoding>>,
     pub analysis_tx: UnboundedSender<AnalysisRequest>,
     pub current_cancel: Arc<Mutex<Option<CancellationToken>>>,
@@ -72,6 +79,7 @@ impl Backend {
             snapshots: Arc::new(DashMap::new()),
             preview_features,
             workspace_root: Arc::new(Mutex::new(None)),
+            manifest: Arc::new(Mutex::new(None)),
             encoding: Arc::new(Mutex::new(PositionEncoding::Utf16)),
             analysis_tx: tx,
             current_cancel: Arc::new(Mutex::new(None)),
@@ -84,6 +92,7 @@ impl Backend {
             snapshots: me.snapshots.clone(),
             preview_features: me.preview_features.clone(),
             workspace_root: me.workspace_root.clone(),
+            manifest: me.manifest.clone(),
             encoding: me.encoding.clone(),
             current_cancel: me.current_cancel.clone(),
             rx,
@@ -107,11 +116,14 @@ impl Backend {
     /// tests can poll a deterministic result.
     pub async fn analyze_now(&self) -> Vec<Diagnostic> {
         let workspace_root = self.workspace_root.lock().await.clone();
+        let manifest = self.manifest.lock().await.clone();
         let target = Target::host();
         let mut combined_diagnostics: FxHashSet<UriDiagKey> = FxHashSet::default();
         let mut by_uri: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
 
-        for (uri, root) in collect_roots(&self.docs) {
+        let roots = collect_analysis_roots(&self.docs, manifest.as_ref());
+
+        for (uri, root) in roots {
             let docs = self.docs.clone();
             let result = analysis::analyze_root(
                 root,
@@ -177,6 +189,45 @@ fn collect_roots(docs: &DashMap<Url, DocState>) -> Vec<(Url, WorkspaceFile)> {
         .collect()
 }
 
+/// ADR-0092: pick the set of compilation roots to analyze this pass.
+///
+/// - **Manifested mode**: one root, the manifest's entry file. The entry's
+///   text comes from any open buffer at the same path, otherwise from disk.
+/// - **Isolation mode**: one root per open buffer, current behaviour.
+pub(crate) fn collect_analysis_roots(
+    docs: &DashMap<Url, DocState>,
+    manifest: Option<&Manifest>,
+) -> Vec<(Url, WorkspaceFile)> {
+    if let Some(m) = manifest {
+        let entry_path = m.target.root().to_path_buf();
+        let text = match open_text_lookup(docs, &entry_path) {
+            Some(t) => t,
+            None => match std::fs::read_to_string(&entry_path) {
+                Ok(t) => t,
+                Err(_) => {
+                    // Entry file disappeared between manifest load and the
+                    // first compile — bail out so the user sees no false
+                    // diagnostics. The watch handler will refresh once it
+                    // reappears.
+                    return Vec::new();
+                }
+            },
+        };
+        let uri = match Url::from_file_path(&entry_path) {
+            Ok(u) => u,
+            Err(_) => return Vec::new(),
+        };
+        let file = WorkspaceFile {
+            path: entry_path,
+            text,
+            file_id: gruel_compiler::FileId::new(1),
+        };
+        vec![(uri, file)]
+    } else {
+        collect_roots(docs)
+    }
+}
+
 /// Compact, `Hash`-able view of an `lsp_types::Range`. `lsp_types::Range`
 /// itself doesn't implement `Hash`, so we serialize it to a tuple before
 /// using it as a dedup key.
@@ -202,6 +253,37 @@ fn open_text_lookup(docs: &DashMap<Url, DocState>, path: &std::path::Path) -> Op
 }
 
 impl Backend {
+    /// ADR-0092: (re-)discover `gruel.json` at `root` and stash the
+    /// result in `self.manifest`. Logs (does not raise diagnostics) on
+    /// parse / validation failure so the editor user sees what's wrong
+    /// without the squiggles spilling into compile diagnostics.
+    pub async fn reload_manifest(&self, root: &std::path::Path) {
+        let Some(path) = gruel_manifest::discover_at_root(root) else {
+            *self.manifest.lock().await = None;
+            return;
+        };
+        match gruel_manifest::load_at(&path) {
+            Ok(m) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("gruel-lsp: loaded manifest at {}", path.display()),
+                    )
+                    .await;
+                *self.manifest.lock().await = Some(m);
+            }
+            Err(err) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("gruel-lsp: invalid manifest at {}: {}", path.display(), err),
+                    )
+                    .await;
+                *self.manifest.lock().await = None;
+            }
+        }
+    }
+
     /// Return the snapshot for queries against `uri`. If the queried URI is
     /// open, prefer its own per-root snapshot; otherwise (e.g. a file that's
     /// only seen as an `@import` target) fall back to any snapshot whose
@@ -233,6 +315,10 @@ struct AnalysisWorker {
     snapshots: Arc<DashMap<Url, Arc<Snapshot>>>,
     preview_features: PreviewFeatures,
     workspace_root: Arc<Mutex<Option<PathBuf>>>,
+    /// ADR-0092: same atomic as `Backend::manifest`, watched by every
+    /// compile pass so swapping in / out of manifested mode is just a
+    /// snapshot read.
+    manifest: Arc<Mutex<Option<Manifest>>>,
     /// Currently negotiated position encoding. Used by later phases when
     /// remapping diagnostic ranges through the source text (Phase 1 publishes
     /// byte-based positions, which clients negotiating UTF-8 see correctly).
@@ -270,7 +356,8 @@ impl AnalysisWorker {
             }
 
             let workspace_root = self.workspace_root.lock().await.clone();
-            let roots = collect_roots(&self.docs);
+            let manifest = self.manifest.lock().await.clone();
+            let roots = collect_analysis_roots(&self.docs, manifest.as_ref());
             let preview_features = self.preview_features.clone();
             let target = self.target.clone();
             let docs_for_lookup = self.docs.clone();
@@ -341,12 +428,21 @@ impl AnalysisWorker {
                 _ = token.cancelled() => continue,
             };
 
-            // Drop snapshots for docs that are no longer open.
-            let open_uris: FxHashSet<Url> = self.docs.iter().map(|kv| kv.key().clone()).collect();
+            // Drop snapshots whose root URI is neither open nor the
+            // current manifest-driven root. In isolation mode that's just
+            // open buffers; in manifested mode the entry URI persists
+            // even when no editor has it open.
+            let mut live_root_uris: FxHashSet<Url> =
+                self.docs.iter().map(|kv| kv.key().clone()).collect();
+            if let Some(m) = manifest.as_ref()
+                && let Ok(u) = Url::from_file_path(m.target.root())
+            {
+                live_root_uris.insert(u);
+            }
             let stale_snapshot_uris: Vec<Url> = self
                 .snapshots
                 .iter()
-                .filter(|kv| !open_uris.contains(kv.key()))
+                .filter(|kv| !live_root_uris.contains(kv.key()))
                 .map(|kv| kv.key().clone())
                 .collect();
             for uri in stale_snapshot_uris {
@@ -430,6 +526,16 @@ impl LanguageServer for Backend {
                 params.root_uri.as_ref().and_then(|u| u.to_file_path().ok())
             })
             .or_else(|| std::env::var_os("GRUEL_LSP_ROOT").map(PathBuf::from));
+
+        // ADR-0092: load `gruel.json` at the workspace root if the preview
+        // feature is enabled. Missing / malformed manifests fall back to
+        // isolation mode (which is the LSP's no-manifest default — the
+        // isolation fix itself is *not* preview-gated).
+        if let Some(root) = root_path.as_deref()
+            && self.preview_features.contains(&gruel_compiler::PreviewFeature::PackageManifest)
+        {
+            self.reload_manifest(root).await;
+        }
         *self.workspace_root.lock().await = root_path;
 
         Ok(InitializeResult {
@@ -516,10 +622,43 @@ impl LanguageServer for Backend {
         // snapshot. The next analysis pass also clears any stale roots, but
         // doing it eagerly keeps queries from racing into a snapshot the
         // editor no longer cares about.
+        //
+        // In manifested mode (ADR-0092) the per-buffer URI is not the
+        // snapshot key, so this removal is a no-op — the manifest-keyed
+        // snapshot stays put until the manifest itself goes away.
         self.snapshots.remove(&uri);
         if let Some(mut entry) = self.docs.get_mut(&uri) {
             entry.open = false;
         }
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        // ADR-0092: if any of the watched events touched `gruel.json`,
+        // reload the manifest and re-queue analysis. Other watched files
+        // are ignored here (we don't currently subscribe to anything
+        // else).
+        let manifest_changed = params.changes.iter().any(|change| {
+            change
+                .uri
+                .to_file_path()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n == "gruel.json"))
+                .unwrap_or(false)
+        });
+        if !manifest_changed {
+            return;
+        }
+        let root = self.workspace_root.lock().await.clone();
+        if let Some(root) = root
+            && self.preview_features.contains(&gruel_compiler::PreviewFeature::PackageManifest)
+        {
+            self.reload_manifest(&root).await;
+        } else {
+            *self.manifest.lock().await = None;
+        }
+        // Drop snapshots — the compilation unit just changed.
+        self.snapshots.clear();
+        self.queue_analysis();
     }
 
     async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {

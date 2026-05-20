@@ -565,7 +565,7 @@ rather than ambient drift.
   - Test: a synthetic overlay that substitutes one file's text; assert
     the substituted text reaches sema.
 
-- [ ] **Phase 4: LSP integration**
+- [x] **Phase 4: LSP integration**
   - `crates/gruel-lsp/src/workspace.rs`: add
     `discover_manifest(root)` that wraps `gruel_manifest`.
   - `Backend::initialize`: discover, store in `manifest:
