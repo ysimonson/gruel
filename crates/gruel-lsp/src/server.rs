@@ -50,9 +50,8 @@ pub struct Backend {
     pub preview_features: PreviewFeatures,
     pub workspace_root: Arc<Mutex<Option<PathBuf>>>,
     /// ADR-0092: loaded `gruel.json` for the workspace root, when one
-    /// exists and `package_manifest` preview is enabled. `None` falls
-    /// back to per-open-buffer isolation mode (the no-manifest default,
-    /// unconditional on the LSP side).
+    /// exists. `None` falls back to per-open-buffer isolation mode
+    /// (the no-manifest default).
     pub manifest: Arc<Mutex<Option<Manifest>>>,
     pub encoding: Arc<Mutex<PositionEncoding>>,
     pub analysis_tx: UnboundedSender<AnalysisRequest>,
@@ -527,13 +526,10 @@ impl LanguageServer for Backend {
             })
             .or_else(|| std::env::var_os("GRUEL_LSP_ROOT").map(PathBuf::from));
 
-        // ADR-0092: load `gruel.json` at the workspace root if the preview
-        // feature is enabled. Missing / malformed manifests fall back to
-        // isolation mode (which is the LSP's no-manifest default — the
-        // isolation fix itself is *not* preview-gated).
-        if let Some(root) = root_path.as_deref()
-            && self.preview_features.contains(&gruel_compiler::PreviewFeature::PackageManifest)
-        {
+        // ADR-0092: load `gruel.json` at the workspace root, if any.
+        // Missing / malformed manifests fall back to isolation mode
+        // (the no-manifest default).
+        if let Some(root) = root_path.as_deref() {
             self.reload_manifest(root).await;
         }
         *self.workspace_root.lock().await = root_path;
@@ -649,9 +645,7 @@ impl LanguageServer for Backend {
             return;
         }
         let root = self.workspace_root.lock().await.clone();
-        if let Some(root) = root
-            && self.preview_features.contains(&gruel_compiler::PreviewFeature::PackageManifest)
-        {
+        if let Some(root) = root {
             self.reload_manifest(&root).await;
         } else {
             *self.manifest.lock().await = None;

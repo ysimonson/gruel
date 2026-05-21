@@ -397,6 +397,12 @@ enum CliCommand {
 #[derive(Args, Debug)]
 struct BuildArgs {
     /// Source files to compile. Multiple files require -o/--output.
+    ///
+    /// The first positional may be a `.gruel` file (legacy / multi-file
+    /// mode), a `gruel.json` file, or a directory containing one. With
+    /// no positional, the manifest is discovered upward from CWD; the
+    /// compiler then uses the manifest's `bin.root` as the entry file
+    /// (ADR-0092).
     sources: Vec<String>,
 
     /// Output binary path (required for multiple source files).
@@ -464,6 +470,11 @@ struct BuildArgs {
 #[derive(Args, Debug)]
 struct RunArgs {
     /// Source files to compile.
+    ///
+    /// Manifest-driven invocation (ADR-0092) is identical to `build` —
+    /// pass a `gruel.json` path or its directory, or rely on upward
+    /// discovery when no positional is given. Library packages cannot
+    /// be run; use `check` instead.
     sources: Vec<String>,
 
     /// Arguments to forward to the compiled program (everything after `--`).
@@ -523,6 +534,9 @@ struct RunArgs {
 #[derive(Args, Debug)]
 struct CheckArgs {
     /// Source files to type-check.
+    ///
+    /// Manifest-driven invocation (ADR-0092) is identical to `build`,
+    /// and both `bin` and `lib` packages are accepted.
     sources: Vec<String>,
 
     /// Compilation target (affects `@target_arch()` / `@target_os()`).
@@ -549,6 +563,10 @@ struct CheckArgs {
 #[derive(Args, Debug)]
 struct DocArgs {
     /// Source files to document.
+    ///
+    /// Manifest-driven invocation (ADR-0092) uses the manifest's
+    /// `bin.root` / `lib.root` as the documentation entry file and
+    /// titles the rendered site after the manifest's `name`.
     sources: Vec<String>,
 
     /// Output format.
@@ -889,24 +907,13 @@ fn apply_manifest(
 ///   a manifest. The caller must use the manifest's root as the entry file
 ///   and reject any extra positionals.
 /// - `Err` on classification or load failure (already-formatted message).
-///
-/// `preview_features` gates the entire manifest pathway behind
-/// `--preview package_manifest`. Without the flag, "no source" stays the
-/// existing error message and explicit `gruel.json`/directory arguments
-/// fall through to the "unsupported source" branch.
 fn resolve_manifest(
     subcommand: ManifestSubcommand,
     sources: &[String],
-    preview_features: &PreviewFeatures,
 ) -> Result<Option<ManifestResolution>, String> {
-    let preview_on = preview_features.contains(&PreviewFeature::PackageManifest);
-
     match classify_first_positional(sources)? {
         FirstPositional::Source => Ok(None),
         FirstPositional::None => {
-            if !preview_on {
-                return Err("Error: No source file specified".to_string());
-            }
             let cwd = std::env::current_dir().map_err(|e| {
                 format!("Error: failed to read current directory: {}", e)
             })?;
@@ -917,12 +924,6 @@ fn resolve_manifest(
             Ok(Some(apply_manifest(subcommand, &manifest_path)?))
         }
         FirstPositional::ManifestFile => {
-            if !preview_on {
-                return Err(format!(
-                    "Error: unsupported source '{}': expected *.gruel, gruel.json, or a directory containing one",
-                    sources[0]
-                ));
-            }
             if sources.len() > 1 {
                 return Err(format!(
                     "Error: manifest-based invocation accepts only one positional; got {}",
@@ -933,12 +934,6 @@ fn resolve_manifest(
             Ok(Some(apply_manifest(subcommand, &path)?))
         }
         FirstPositional::ManifestDir => {
-            if !preview_on {
-                return Err(format!(
-                    "Error: unsupported source '{}': expected *.gruel, gruel.json, or a directory containing one",
-                    sources[0]
-                ));
-            }
             if sources.len() > 1 {
                 return Err(format!(
                     "Error: manifest-based invocation accepts only one positional; got {}",
@@ -962,9 +957,7 @@ fn resolve_build(args: BuildArgs) -> Result<BuildOpts, String> {
     // ADR-0092: classify the first positional. If it resolves to a
     // manifest, use the manifest's root as the entry and the manifest's
     // name as the default `-o` (when `-o` is omitted).
-    if let Some(manifest) =
-        resolve_manifest(ManifestSubcommand::Build, &args.sources, &preview_features)?
-    {
+    if let Some(manifest) = resolve_manifest(ManifestSubcommand::Build, &args.sources)? {
         let output_path = args.output.unwrap_or_else(|| manifest.package_name.clone());
         return Ok(BuildOpts {
             source_paths: vec![manifest.root],
@@ -1031,11 +1024,7 @@ fn resolve_run(args: RunArgs) -> Result<RunOpts, String> {
     let linker = resolve_linker(args.linker);
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
 
-    let source_paths = match resolve_manifest(
-        ManifestSubcommand::Run,
-        &args.sources,
-        &preview_features,
-    )? {
+    let source_paths = match resolve_manifest(ManifestSubcommand::Run, &args.sources)? {
         Some(manifest) => vec![manifest.root],
         None => {
             if args.sources.is_empty() {
@@ -1063,11 +1052,7 @@ fn resolve_run(args: RunArgs) -> Result<RunOpts, String> {
 fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
 
-    let source_paths = match resolve_manifest(
-        ManifestSubcommand::Check,
-        &args.sources,
-        &preview_features,
-    )? {
+    let source_paths = match resolve_manifest(ManifestSubcommand::Check, &args.sources)? {
         Some(manifest) => vec![manifest.root],
         None => {
             if args.sources.is_empty() {
@@ -1090,11 +1075,7 @@ fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
 fn resolve_doc(args: DocArgs) -> Result<DocOpts, String> {
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
 
-    let (source_paths, package_name) = match resolve_manifest(
-        ManifestSubcommand::Doc,
-        &args.sources,
-        &preview_features,
-    )? {
+    let (source_paths, package_name) = match resolve_manifest(ManifestSubcommand::Doc, &args.sources)? {
         Some(manifest) => (vec![manifest.root], Some(manifest.package_name)),
         None => {
             if args.sources.is_empty() {
@@ -3111,10 +3092,6 @@ mod tests {
 
     // ========== ADR-0092: package manifest CLI ==========
 
-    fn previews_with(features: &[PreviewFeature]) -> PreviewFeatures {
-        features.iter().copied().collect()
-    }
-
     #[test]
     fn classify_dot_gruel_is_source() {
         let cases = vec!["foo.gruel".to_string()];
@@ -3140,35 +3117,15 @@ mod tests {
     }
 
     #[test]
-    fn resolve_manifest_empty_no_preview_errors() {
-        let err = resolve_manifest(
-            ManifestSubcommand::Build,
-            &[],
-            &PreviewFeatures::default(),
-        )
-        .unwrap_err();
-        assert!(err.contains("No source file specified"));
-    }
-
-    #[test]
     fn resolve_manifest_dot_gruel_passes_through() {
-        let result = resolve_manifest(
-            ManifestSubcommand::Build,
-            &["src.gruel".to_string()],
-            &previews_with(&[PreviewFeature::PackageManifest]),
-        )
-        .unwrap();
+        let result = resolve_manifest(ManifestSubcommand::Build, &["src.gruel".to_string()]).unwrap();
         assert!(result.is_none(), "*.gruel should be Source, not manifest");
     }
 
     #[test]
     fn resolve_manifest_unsupported_extension_errors() {
-        let err = resolve_manifest(
-            ManifestSubcommand::Build,
-            &["src.txt".to_string()],
-            &previews_with(&[PreviewFeature::PackageManifest]),
-        )
-        .unwrap_err();
+        let err =
+            resolve_manifest(ManifestSubcommand::Build, &["src.txt".to_string()]).unwrap_err();
         assert!(err.contains("unsupported source"));
     }
 }

@@ -72,13 +72,7 @@ fn build_implicit_manifest_discovery_in_cwd() {
 
     let (code, _stdout, stderr) = run_gruel(
         Some(pkg.path()),
-        &[
-            "build",
-            "--preview",
-            "package_manifest",
-            "-o",
-            out_path.to_str().unwrap(),
-        ],
+        &["build", "-o", out_path.to_str().unwrap()],
     );
     assert_eq!(code, 0, "build failed: stderr={}", stderr);
     assert!(out_path.exists(), "expected output binary at {:?}", out_path);
@@ -93,8 +87,6 @@ fn build_explicit_manifest_dir() {
         None,
         &[
             "build",
-            "--preview",
-            "package_manifest",
             pkg.path().to_str().unwrap(),
             "-o",
             out_path.to_str().unwrap(),
@@ -114,8 +106,6 @@ fn build_explicit_manifest_file() {
         None,
         &[
             "build",
-            "--preview",
-            "package_manifest",
             manifest.to_str().unwrap(),
             "-o",
             out_path.to_str().unwrap(),
@@ -127,8 +117,7 @@ fn build_explicit_manifest_file() {
 
 #[test]
 fn build_legacy_single_file_still_works() {
-    // The `.gruel` positional branch bypasses manifests entirely — even with
-    // the preview flag, a direct file path goes through the existing code.
+    // The `.gruel` positional branch bypasses manifests entirely.
     let pkg = write_bin_package("hi", "0.1.0", "src/main.gruel", MAIN_SRC);
     let src = pkg.path().join("src/main.gruel");
     let out_path = pkg.path().join("legacy");
@@ -137,8 +126,6 @@ fn build_legacy_single_file_still_works() {
         None,
         &[
             "build",
-            "--preview",
-            "package_manifest",
             src.to_str().unwrap(),
             "-o",
             out_path.to_str().unwrap(),
@@ -151,15 +138,7 @@ fn build_legacy_single_file_still_works() {
 #[test]
 fn build_library_rejected() {
     let pkg = write_lib_package("math", "0.1.0", "src/lib.gruel", LIB_SRC);
-    let (code, _stdout, stderr) = run_gruel(
-        None,
-        &[
-            "build",
-            "--preview",
-            "package_manifest",
-            pkg.path().to_str().unwrap(),
-        ],
-    );
+    let (code, _stdout, stderr) = run_gruel(None, &["build", pkg.path().to_str().unwrap()]);
     assert_ne!(code, 0, "build should fail on library package");
     assert!(
         stderr.contains("library") && stderr.contains("cannot build"),
@@ -171,15 +150,7 @@ fn build_library_rejected() {
 #[test]
 fn run_library_rejected() {
     let pkg = write_lib_package("math", "0.1.0", "src/lib.gruel", LIB_SRC);
-    let (code, _stdout, stderr) = run_gruel(
-        None,
-        &[
-            "run",
-            "--preview",
-            "package_manifest",
-            pkg.path().to_str().unwrap(),
-        ],
-    );
+    let (code, _stdout, stderr) = run_gruel(None, &["run", pkg.path().to_str().unwrap()]);
     assert_ne!(code, 0, "run should fail on library package");
     assert!(
         stderr.contains("library") && stderr.contains("cannot run"),
@@ -191,15 +162,7 @@ fn run_library_rejected() {
 #[test]
 fn check_accepts_library() {
     let pkg = write_lib_package("math", "0.1.0", "src/lib.gruel", LIB_SRC);
-    let (code, _stdout, stderr) = run_gruel(
-        None,
-        &[
-            "check",
-            "--preview",
-            "package_manifest",
-            pkg.path().to_str().unwrap(),
-        ],
-    );
+    let (code, _stdout, stderr) = run_gruel(None, &["check", pkg.path().to_str().unwrap()]);
     assert_eq!(code, 0, "check failed on library: stderr={}", stderr);
 }
 
@@ -212,8 +175,6 @@ fn doc_accepts_library_and_uses_manifest_name_for_title() {
         None,
         &[
             "doc",
-            "--preview",
-            "package_manifest",
             "--output-dir",
             doc_dir.to_str().unwrap(),
             pkg.path().to_str().unwrap(),
@@ -237,8 +198,6 @@ fn doc_accepts_bin_package_uses_manifest_name() {
         None,
         &[
             "doc",
-            "--preview",
-            "package_manifest",
             "--output-dir",
             doc_dir.to_str().unwrap(),
             pkg.path().to_str().unwrap(),
@@ -260,8 +219,6 @@ fn extra_positional_on_manifest_branch_rejected() {
         None,
         &[
             "build",
-            "--preview",
-            "package_manifest",
             pkg.path().to_str().unwrap(),
             "extra-positional.gruel",
         ],
@@ -275,45 +232,13 @@ fn extra_positional_on_manifest_branch_rejected() {
 }
 
 #[test]
-fn manifest_path_without_preview_flag_unsupported() {
-    let pkg = write_bin_package("hi", "0.1.0", "src/main.gruel", MAIN_SRC);
-    let (code, _stdout, stderr) = run_gruel(
-        None,
-        &["build", pkg.path().to_str().unwrap()],
-    );
-    assert_ne!(code, 0, "manifest dir without preview should error");
-    assert!(
-        stderr.contains("unsupported source"),
-        "expected unsupported-source error, got: {}",
-        stderr
-    );
-}
-
-#[test]
-fn no_source_no_manifest_no_preview_keeps_legacy_error() {
-    let dir = TempDir::new().unwrap();
-    let (code, _stdout, stderr) = run_gruel(Some(dir.path()), &["build"]);
-    assert_ne!(code, 0, "missing source should error");
-    assert!(
-        stderr.contains("No source file specified"),
-        "expected legacy missing-source error, got: {}",
-        stderr
-    );
-}
-
-#[test]
-fn no_source_with_preview_but_no_manifest_in_ancestors() {
+fn no_source_no_manifest_in_ancestors_reports_helpful_error() {
     let dir = TempDir::new().unwrap();
     // Run from inside a temp dir that has no gruel.json upstream. (The check
     // is best-effort — if the test host has a gruel.json on disk somewhere
     // above the system tempdir, this would be a false negative.)
-    let (code, _stdout, stderr) = run_gruel(
-        Some(dir.path()),
-        &["build", "--preview", "package_manifest"],
-    );
+    let (code, _stdout, stderr) = run_gruel(Some(dir.path()), &["build"]);
     assert_ne!(code, 0, "expected failure");
-    // Either path is acceptable, depending on whether the test host has a
-    // gruel.json above the system tempdir.
     assert!(
         stderr.contains("no gruel.json found") || stderr.contains("invalid manifest"),
         "expected manifest-discovery failure, got: {}",
@@ -325,10 +250,7 @@ fn no_source_with_preview_but_no_manifest_in_ancestors() {
 fn build_implicit_default_output_is_manifest_name() {
     let pkg = write_bin_package("widget", "0.1.0", "src/main.gruel", MAIN_SRC);
 
-    let (code, _stdout, stderr) = run_gruel(
-        Some(pkg.path()),
-        &["build", "--preview", "package_manifest"],
-    );
+    let (code, _stdout, stderr) = run_gruel(Some(pkg.path()), &["build"]);
     assert_eq!(code, 0, "build failed: stderr={}", stderr);
     let expected = pkg.path().join("widget");
     assert!(

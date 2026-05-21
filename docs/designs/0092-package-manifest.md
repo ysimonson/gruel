@@ -1,12 +1,12 @@
 ---
 id: 0092
 title: Package Manifest (`gruel.json`)
-status: proposal
+status: implemented
 tags: [tooling, lsp, manifest, packaging, dx]
 feature-flag: package_manifest
 created: 2026-05-19
-accepted:
-implemented:
+accepted: 2026-05-20
+implemented: 2026-05-20
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -605,7 +605,12 @@ rather than ambient drift.
     confirm both modes agree on diagnostics for the case where they
     *should* produce the same result.
 
-- [ ] **Phase 5: Documentation + stabilisation**
+- [x] **Phase 5: Documentation + stabilisation**
+
+> All phases shipped on 2026-05-20. The `PackageManifest` preview gate
+> has been removed; manifest discovery is unconditional in both the CLI
+> (which falls back to upward discovery when no positional is given) and
+> the LSP (which falls back to isolation mode when no manifest is found).
   - `crates/gruel-lsp/README.md`: document discovery, watched-file
     behaviour, isolation fallback.
   - `crates/gruel/src/main.rs --help` / clap docstrings: mention the

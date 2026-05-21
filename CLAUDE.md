@@ -641,16 +641,22 @@ When all tests pass and the feature is complete:
       `crates/gruel-lsp/tests/spec_corpus_diagnostic_differential.rs` (wired into
       `make test`) fails the build if your spec or UI tests produce different
       diagnostics under the LSP than under `gruel check`.
-    - **Per-root analysis (ADR-0091 Phase 8):** the LSP analyzes each open
-      document as its own root and only pulls in files transitively reachable
-      through that root's `@import` graph (see
-      `crates/gruel-lsp/src/workspace.rs::build_root_closure`). Two unrelated
-      `fn main()` files in the same workspace do *not* collide. Snapshots are
-      keyed by URI (`Backend.snapshots`); `workspace/symbol` and `textDocument/
-      references` walk every snapshot to union results across compilation
-      units. If you're adding a query handler: hover/goto/signature/completion/
-      inlay take the request URI and look up its snapshot via
-      `snapshot_for(&uri)`; workspace-wide queries iterate `all_snapshots()`.
+    - **Per-root analysis (ADR-0091 Phase 8 + ADR-0092):** the LSP picks
+      one of two modes per compile pass.
+      - **Isolation mode** (no `gruel.json` at the workspace root, or
+        manifest fails to load): each open editor buffer is its own root.
+        See `crates/gruel-lsp/src/workspace.rs::build_root_closure`.
+      - **Manifested mode** (`gruel.json` present + `package_manifest`
+        preview enabled): one root, the manifest's `target.root` entry
+        file. Open-buffer text overrides the on-disk file; the closure
+        walker still pulls in transitively-imported files. Manifest
+        changes via `workspace/didChangeWatchedFiles` flip modes live.
+      In either mode, snapshots are keyed by URI (`Backend.snapshots`);
+      `workspace/symbol` and `textDocument/references` walk every
+      snapshot to union results across compilation units. If you're
+      adding a query handler: hover/goto/signature/completion/inlay take
+      the request URI and look up its snapshot via `snapshot_for(&uri)`;
+      workspace-wide queries iterate `all_snapshots()`.
 
 11. **Run `make test`** to verify all tests pass and traceability is maintained
 
