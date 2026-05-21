@@ -9,6 +9,7 @@
         fuzz-comptime-differential fuzz-parser-differential \
         tree-sitter-generate tree-sitter-test \
         lsp-diagnostic-differential \
+        install-lsp \
         claude
 
 # Detect LLVM 22 on macOS (Homebrew). Set LLVM_SYS_221_PREFIX if not already set.
@@ -76,6 +77,14 @@ lsp-diagnostic-differential:
 	$(TIMEOUT) cargo test -p gruel-lsp \
 		--test spec_corpus_diagnostic_differential \
 		-- --nocapture --ignored
+
+# Reinstall the `gruel` binary that the Zed/Helix/Neovim LSP extensions
+# launch. The Zed extension just runs `gruel lsp` from PATH, so this is
+# how you pick up LSP changes — `cargo build` alone leaves the stale
+# binary at ~/.cargo/bin/gruel in place. Restart the LSP in your editor
+# (e.g. `zed: restart language server`) after this finishes.
+install-lsp:
+	cargo install --path crates/gruel --force
 
 # Format all Rust files.
 fmt:
