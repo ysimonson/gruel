@@ -1,12 +1,12 @@
 ---
 id: 0093
 title: `gruel fmt` source formatter
-status: proposal
+status: implemented
 tags: [tooling, formatter, dx]
-feature-flag: fmt
+feature-flag:
 created: 2026-05-21
-accepted:
-implemented:
+accepted: 2026-05-26
+implemented: 2026-05-26
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -389,7 +389,7 @@ formatter must never change semantics.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Scaffolding + smallest formatter**
+- [x] **Phase 1: Scaffolding + smallest formatter**
   - Create `crates/gruel-fmt` with `Cargo.toml` and `src/lib.rs`.
     Deps: `gruel-parser`, `gruel-lexer`, `gruel-util`, `lasso`.
   - `pub fn format_source(src: &str) -> Result<String, FmtError>`.
@@ -399,7 +399,7 @@ formatter must never change semantics.
     `fn main() -> i32 { 0 }`. Emit canonical form.
   - Snapshot test infra under `crates/gruel-fmt/tests/snapshots/`.
 
-- [ ] **Phase 2: Expressions and statements**
+- [x] **Phase 2: Expressions and statements**
   - Exhaustive `match` over `Expr` and `Statement`. Compiler enforces
     completeness so any new variant adds a TODO arm via
     `#[deny(non_exhaustive_omitted_patterns)]` (or matching default
@@ -411,7 +411,7 @@ formatter must never change semantics.
   - Blocks (`BlockExpr`): always multi-line; final expression has no
     trailing `;`.
 
-- [ ] **Phase 3: All top-level items**
+- [x] **Phase 3: All top-level items**
   - `Function`, `StructDecl`, `EnumDecl`, `InterfaceDecl`,
     `DeriveDecl`, `ConstDecl`, `LinkExternBlock`.
   - Doc comments (`///`) and directives in canonical order.
@@ -419,7 +419,7 @@ formatter must never change semantics.
   - Parameter list, return type, body.
   - Snapshot tests cover one example per item kind.
 
-- [ ] **Phase 4: Trivia weaving**
+- [x] **Phase 4: Trivia weaving**
   - `trivia_scan(src) -> TriviaTable` over raw bytes. Handles `//`
     line comments (any slash run except `///` exactly), and blank-line
     runs. Returns a sorted vector of `(start, end, kind)`.
@@ -431,7 +431,7 @@ formatter must never change semantics.
   - Tests for every weaving case listed under "Comment weaving"
     above.
 
-- [ ] **Phase 5: CLI subcommand**
+- [x] **Phase 5: CLI subcommand**
   - `gruel fmt` clap subcommand in `crates/gruel/src/main.rs` with
     `BUILD/RUN/CHECK`-style `FmtArgs` and resolved `FmtOpts`.
   - Manifest discovery for the no-arg case (reuse `discover_upward`).
@@ -442,7 +442,7 @@ formatter must never change semantics.
   - `--emit stdout` and `-` (stdin → stdout).
   - Wire `PreviewFeature::Fmt` gate at the CLI entry.
 
-- [ ] **Phase 6: Idempotence and corpus tests**
+- [x] **Phase 6: Idempotence and corpus tests**
   - Test in `gruel-fmt` that loads every `.gruel` source from
     `crates/gruel-spec/cases/` and `crates/gruel-ui-tests/cases/`
     (the test TOMLs already inline source), runs `format_source`
@@ -454,7 +454,7 @@ formatter must never change semantics.
     test orchestration (similar to the tree-sitter differential
     test from ADR-0090).
 
-- [ ] **Phase 7: LSP integration**
+- [x] **Phase 7: LSP integration**
   - Add `gruel-fmt` to `crates/gruel-lsp/Cargo.toml` dependencies.
   - Implement `async fn formatting(&self, params:
     DocumentFormattingParams) -> jsonrpc::Result<Option<Vec<TextEdit>>>`
@@ -487,7 +487,7 @@ formatter must never change semantics.
   - Cross-link from ADR-0091's "Future Work → Formatter integration"
     bullet to this phase (single-line update).
 
-- [ ] **Phase 8: Stabilisation**
+- [x] **Phase 8: Stabilisation**
   - Remove `PreviewFeature::Fmt` and its CLI gate.
   - Add `make fmt` (runs `gruel fmt`) and `make fmt-check` (runs
     `gruel fmt --check`) to `Makefile`.

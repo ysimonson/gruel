@@ -98,8 +98,10 @@ complementary slot: anything that requires `gruel-air::Sema`.
   not duplicate them. (If/when a future editor without tree-sitter
   support needs document symbols via LSP, that becomes a small
   follow-up — but is not required for the MVP.)
-- **Formatting.** No `gruel-fmt` exists yet; `textDocument/formatting`
-  is deferred until there is a formatter to drive.
+- **Formatting.** Document-level `textDocument/formatting` was added by
+  [ADR-0093](0093-gruel-fmt.md) (`Backend::formatting`).
+  `rangeFormatting` and `onTypeFormatting` remain deferred — see
+  ADR-0093 for the carve-out rationale.
 - **Refactorings other than rename.** Extract-function, inline, etc.
   are out of scope; they have to wait for the compiler to grow the
   primitives that make them safe.
@@ -961,8 +963,11 @@ pump.
 - **Refactorings beyond rename.** Extract function, extract variable,
   inline — these need compiler primitives (AST mutators, span
   preservation across rewrites) that aren't yet in place.
-- **Formatter integration.** When a `gruel-fmt` exists, wire
-  `textDocument/formatting` and `textDocument/rangeFormatting`.
+- **Formatter integration.** Document-level `textDocument/formatting`
+  is delivered by [ADR-0093 Phase 7](0093-gruel-fmt.md) (handler in
+  `Backend::formatting`, shares the `DocState`/`LineMap` machinery
+  documented here). `rangeFormatting` and `onTypeFormatting` are still
+  open — see ADR-0093 Future Work for the reasons each is deferred.
 - **DAP server.** Debugging support is a separate protocol and a
   separate ADR.
 - **Per-cargo-style project model.** When the package manager lands,

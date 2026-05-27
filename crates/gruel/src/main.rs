@@ -387,6 +387,9 @@ enum CliCommand {
     /// grammar (ADR-0090) — this LSP only fills the semantic surface
     /// (diagnostics, hover, goto, completion, code actions).
     Lsp(LspArgs),
+    /// Format Gruel source files in place (ADR-0093). Preview-gated until
+    /// the formatter stabilises.
+    Fmt(FmtArgs),
     /// Manage the incremental compilation cache (ADR-0074).
     Cache {
         #[command(subcommand)]
@@ -629,6 +632,25 @@ struct EmitArgs {
     benchmark_json: bool,
 }
 
+/// `gruel fmt` arguments (ADR-0093).
+#[derive(Args, Debug)]
+struct FmtArgs {
+    /// Path to format: a `.gruel` file, a directory (recursive), or `-` for
+    /// stdin. With no argument, the manifest is discovered upward from CWD
+    /// and the whole workspace is formatted.
+    path: Option<String>,
+
+    /// Print a unified diff per file that would change; exit 1 if any file
+    /// would change or fails to parse. Does not modify files on disk.
+    #[arg(long)]
+    check: bool,
+
+    /// Write the formatted output instead of editing in place. Only
+    /// `stdout` is supported; requires a single file or `-` (stdin).
+    #[arg(long, value_name = "TARGET")]
+    emit: Option<String>,
+}
+
 /// `gruel lsp` arguments (ADR-0091).
 #[derive(Args, Debug)]
 struct LspArgs {
@@ -756,6 +778,23 @@ struct LspOpts {
     cache_dir: Option<String>,
 }
 
+/// Resolved options for `gruel fmt` (ADR-0093).
+struct FmtOpts {
+    source: FmtSource,
+    mode: FmtMode,
+}
+
+enum FmtSource {
+    Stdin,
+    Files(Vec<std::path::PathBuf>),
+}
+
+enum FmtMode {
+    InPlace,
+    Check,
+    Stdout,
+}
+
 /// The fully-resolved CLI command, after defaults/conflicts have been
 /// normalized.
 enum ResolvedCommand {
@@ -765,6 +804,7 @@ enum ResolvedCommand {
     Doc(DocOpts),
     Emit(EmitOpts),
     Lsp(LspOpts),
+    Fmt(FmtOpts),
     Cache(CacheOpts),
 }
 
@@ -883,7 +923,12 @@ fn apply_manifest(
     let manifest = gruel_manifest::load_at(manifest_path).map_err(|err| err.to_string())?;
     let is_library = manifest.target.is_library();
 
-    if is_library && matches!(subcommand, ManifestSubcommand::Build | ManifestSubcommand::Run) {
+    if is_library
+        && matches!(
+            subcommand,
+            ManifestSubcommand::Build | ManifestSubcommand::Run
+        )
+    {
         return Err(format!(
             "Error: package '{}' is a library (no 'bin' in gruel.json); cannot {}. \
              Use 'gruel check' or pass an explicit source file.",
@@ -914,9 +959,8 @@ fn resolve_manifest(
     match classify_first_positional(sources)? {
         FirstPositional::Source => Ok(None),
         FirstPositional::None => {
-            let cwd = std::env::current_dir().map_err(|e| {
-                format!("Error: failed to read current directory: {}", e)
-            })?;
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("Error: failed to read current directory: {}", e))?;
             let manifest_path = gruel_manifest::discover_upward(&cwd).ok_or_else(|| {
                 "Error: no source file specified and no gruel.json found in current or any ancestor directory"
                     .to_string()
@@ -1075,15 +1119,16 @@ fn resolve_check(args: CheckArgs) -> Result<CheckOpts, String> {
 fn resolve_doc(args: DocArgs) -> Result<DocOpts, String> {
     let preview_features: PreviewFeatures = args.preview.into_iter().collect();
 
-    let (source_paths, package_name) = match resolve_manifest(ManifestSubcommand::Doc, &args.sources)? {
-        Some(manifest) => (vec![manifest.root], Some(manifest.package_name)),
-        None => {
-            if args.sources.is_empty() {
-                return Err("Error: No source file specified".to_string());
+    let (source_paths, package_name) =
+        match resolve_manifest(ManifestSubcommand::Doc, &args.sources)? {
+            Some(manifest) => (vec![manifest.root], Some(manifest.package_name)),
+            None => {
+                if args.sources.is_empty() {
+                    return Err("Error: No source file specified".to_string());
+                }
+                (args.sources, None)
             }
-            (args.sources, None)
-        }
-    };
+        };
 
     Ok(DocOpts {
         source_paths,
@@ -1129,6 +1174,110 @@ fn resolve_lsp(args: LspArgs) -> Result<LspOpts, String> {
     })
 }
 
+fn resolve_fmt(args: FmtArgs) -> Result<FmtOpts, String> {
+    // Validate --emit value.
+    let emit_stdout = match args.emit.as_deref() {
+        None => false,
+        Some("stdout") => true,
+        Some(other) => {
+            return Err(format!(
+                "Error: --emit only supports 'stdout' (got '{}')",
+                other
+            ));
+        }
+    };
+
+    if args.check && emit_stdout {
+        return Err("Error: --check and --emit stdout are mutually exclusive".to_string());
+    }
+
+    // Source classification.
+    let source = match args.path.as_deref() {
+        Some("-") => FmtSource::Stdin,
+        Some(path_str) => {
+            let path = std::path::PathBuf::from(path_str);
+            if !path.exists() {
+                return Err(format!("Error: path does not exist: {}", path_str));
+            }
+            if path.is_file() {
+                FmtSource::Files(vec![path])
+            } else if path.is_dir() {
+                FmtSource::Files(collect_gruel_files(&path))
+            } else {
+                return Err(format!(
+                    "Error: path is neither a file nor a directory: {}",
+                    path_str
+                ));
+            }
+        }
+        None => {
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("Error: failed to read current directory: {}", e))?;
+            let manifest_path = gruel_manifest::discover_upward(&cwd).ok_or_else(|| {
+                "Error: no path given and no gruel.json found in current or any ancestor directory; \
+                 pass a path or create gruel.json"
+                    .to_string()
+            })?;
+            let manifest_dir = manifest_path
+                .parent()
+                .ok_or_else(|| "Error: manifest path has no parent".to_string())?;
+            FmtSource::Files(collect_gruel_files(manifest_dir))
+        }
+    };
+
+    // Mode resolution. Stdin always emits to stdout.
+    let mode = match (&source, args.check, emit_stdout) {
+        (FmtSource::Stdin, _, _) => FmtMode::Stdout,
+        (_, true, _) => FmtMode::Check,
+        (_, _, true) => FmtMode::Stdout,
+        _ => FmtMode::InPlace,
+    };
+
+    // --emit stdout requires a single file (otherwise the multi-file output
+    // is meaningless).
+    if matches!(mode, FmtMode::Stdout)
+        && let FmtSource::Files(files) = &source
+        && files.len() != 1
+    {
+        return Err(format!(
+            "Error: --emit stdout requires exactly one file ({} found); pass an explicit path or `-`",
+            files.len()
+        ));
+    }
+
+    Ok(FmtOpts { source, mode })
+}
+
+/// Recursively collect `.gruel` files under `dir`, sorted by path for
+/// deterministic output. Skips `target/`, `.git/`, and any dot-prefixed
+/// directory.
+fn collect_gruel_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            if entry.depth() == 0 {
+                return true;
+            }
+            if entry.file_type().is_dir() {
+                if name == "target" || name == ".git" {
+                    return false;
+                }
+                if name.starts_with('.') {
+                    return false;
+                }
+            }
+            true
+        })
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("gruel"))
+        .collect();
+    files.sort();
+    files
+}
+
 fn resolve_cli(cli: Cli) -> Result<ParsedCli, String> {
     let globals = GlobalOpts {
         log_level: cli.log_level,
@@ -1141,6 +1290,7 @@ fn resolve_cli(cli: Cli) -> Result<ParsedCli, String> {
         CliCommand::Doc(args) => ResolvedCommand::Doc(resolve_doc(args)?),
         CliCommand::Emit(args) => ResolvedCommand::Emit(resolve_emit(args)?),
         CliCommand::Lsp(args) => ResolvedCommand::Lsp(resolve_lsp(args)?),
+        CliCommand::Fmt(args) => ResolvedCommand::Fmt(resolve_fmt(args)?),
         CliCommand::Cache { action } => ResolvedCommand::Cache(match action {
             CacheActionArgs::Stats { cache_dir } => CacheOpts::Stats { cache_dir },
             CacheActionArgs::Clean { cache_dir } => CacheOpts::Clean { cache_dir },
@@ -1335,9 +1485,10 @@ fn main() {
         ResolvedCommand::Run(o) => (o.time_passes, false),
         ResolvedCommand::Check(o) => (o.time_passes, o.benchmark_json),
         ResolvedCommand::Emit(o) => (o.time_passes, o.benchmark_json),
-        ResolvedCommand::Doc(_) | ResolvedCommand::Cache(_) | ResolvedCommand::Lsp(_) => {
-            (false, false)
-        }
+        ResolvedCommand::Doc(_)
+        | ResolvedCommand::Cache(_)
+        | ResolvedCommand::Lsp(_)
+        | ResolvedCommand::Fmt(_) => (false, false),
     };
 
     let timing_data = init_tracing(
@@ -1354,6 +1505,7 @@ fn main() {
         ResolvedCommand::Doc(opts) => run_doc(&opts),
         ResolvedCommand::Emit(opts) => run_emit(opts, timing_data),
         ResolvedCommand::Lsp(opts) => run_lsp(opts),
+        ResolvedCommand::Fmt(opts) => run_fmt(opts),
         ResolvedCommand::Cache(CacheOpts::Stats { cache_dir }) => {
             run_cache_stats(std::path::Path::new(&cache_dir));
         }
@@ -1654,6 +1806,112 @@ fn run_run(opts: RunOpts, timing_data: Option<timing::TimingData>) {
 }
 
 /// ADR-0091: spawn the Gruel Language Server over stdio.
+fn run_fmt(opts: FmtOpts) {
+    use std::io::{Read, Write};
+
+    let mut exit_code: i32 = 0;
+    match opts.source {
+        FmtSource::Stdin => {
+            let mut buf = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+                eprintln!("Error reading stdin: {}", e);
+                std::process::exit(1);
+            }
+            match gruel_fmt::format_source(&buf) {
+                Ok(formatted) => {
+                    let mut stdout = std::io::stdout().lock();
+                    if let Err(e) = stdout.write_all(formatted.as_bytes()) {
+                        eprintln!("Error writing stdout: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("<stdin>: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        FmtSource::Files(paths) => {
+            if paths.is_empty() {
+                eprintln!("Error: no .gruel files found");
+                std::process::exit(1);
+            }
+            for path in &paths {
+                match fmt_one_file(path, &opts.mode) {
+                    FmtFileOutcome::Ok => {}
+                    FmtFileOutcome::WouldChange => exit_code = 1,
+                    FmtFileOutcome::Error => exit_code = 1,
+                }
+            }
+        }
+    }
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+enum FmtFileOutcome {
+    /// No diff (or wrote successfully in InPlace/Stdout mode).
+    Ok,
+    /// `--check` mode: the file would change. Diff was printed.
+    WouldChange,
+    /// IO or parse error. Message was already printed to stderr.
+    Error,
+}
+
+fn fmt_one_file(path: &std::path::Path, mode: &FmtMode) -> FmtFileOutcome {
+    use std::io::Write;
+
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {}: {}", path.display(), e);
+            return FmtFileOutcome::Error;
+        }
+    };
+    let formatted = match gruel_fmt::format_source(&original) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}: {}", path.display(), e);
+            return FmtFileOutcome::Error;
+        }
+    };
+
+    match mode {
+        FmtMode::Stdout => {
+            let mut stdout = std::io::stdout().lock();
+            if let Err(e) = stdout.write_all(formatted.as_bytes()) {
+                eprintln!("Error writing stdout: {}", e);
+                return FmtFileOutcome::Error;
+            }
+            FmtFileOutcome::Ok
+        }
+        FmtMode::Check => {
+            if formatted == original {
+                FmtFileOutcome::Ok
+            } else {
+                let diff = similar::TextDiff::from_lines(&original, &formatted);
+                let old_header = format!("{} (original)", path.display());
+                let new_header = format!("{} (formatted)", path.display());
+                let mut udiff = diff.unified_diff();
+                let display = udiff.context_radius(3).header(&old_header, &new_header);
+                println!("{}", display);
+                FmtFileOutcome::WouldChange
+            }
+        }
+        FmtMode::InPlace => {
+            if formatted == original {
+                FmtFileOutcome::Ok
+            } else if let Err(e) = std::fs::write(path, formatted) {
+                eprintln!("Error writing {}: {}", path.display(), e);
+                FmtFileOutcome::Error
+            } else {
+                FmtFileOutcome::Ok
+            }
+        }
+    }
+}
+
 fn run_lsp(opts: LspOpts) {
     // `--root` is honoured as a fallback workspace root; the LSP `initialize`
     // request can still override it. We pass it through via an env-style
@@ -3118,7 +3376,8 @@ mod tests {
 
     #[test]
     fn resolve_manifest_dot_gruel_passes_through() {
-        let result = resolve_manifest(ManifestSubcommand::Build, &["src.gruel".to_string()]).unwrap();
+        let result =
+            resolve_manifest(ManifestSubcommand::Build, &["src.gruel".to_string()]).unwrap();
         assert!(result.is_none(), "*.gruel should be Source, not manifest");
     }
 

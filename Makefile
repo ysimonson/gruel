@@ -9,6 +9,7 @@
         fuzz-comptime-differential fuzz-parser-differential \
         tree-sitter-generate tree-sitter-test \
         lsp-diagnostic-differential \
+        gruel-fmt gruel-fmt-check gruel-fmt-corpus \
         install-lsp \
         claude
 
@@ -44,7 +45,7 @@ doctest:
 
 # Run all tests (unit + doctests + spec + traceability + UI tests + examples).
 # Pass ARGS="pattern" to filter spec/UI/example tests, e.g.: make test ARGS="1.1"
-test: quick-test doctest tree-sitter-differential lsp-diagnostic-differential
+test: quick-test doctest tree-sitter-differential lsp-diagnostic-differential gruel-fmt-corpus
 	$(TIMEOUT) cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \
@@ -67,6 +68,24 @@ test: quick-test doctest tree-sitter-differential lsp-diagnostic-differential
 tree-sitter-differential:
 	$(TIMEOUT) cargo test --manifest-path tree-sitter-gruel/bindings/rust/Cargo.toml \
 		--test spec_corpus_differential -- --nocapture
+
+# ADR-0093: invoke `gruel fmt` on the path passed via ARGS (or `--check`-
+# the path via gruel-fmt-check). Kept under the `gruel-` namespace so it
+# doesn't collide with the `fmt` target above (which runs `cargo fmt`).
+#
+#   make gruel-fmt ARGS="path/to/file_or_dir"
+#   make gruel-fmt-check ARGS="path/to/file_or_dir"
+gruel-fmt:
+	$(TIMEOUT) cargo run -p gruel -- fmt $(ARGS)
+
+gruel-fmt-check:
+	$(TIMEOUT) cargo run -p gruel -- fmt --check $(ARGS)
+
+# ADR-0093 Phase 6: run gruel-fmt's idempotence + reparse test over every
+# spec/UI test case. Catches formatter regressions that don't show up in
+# the per-feature snapshot tests.
+gruel-fmt-corpus:
+	$(TIMEOUT) cargo test -p gruel-fmt --test corpus -- --nocapture
 
 # ADR-0091: assert that gruel-lsp emits the same diagnostics as the
 # `gruel check` code path for every TOML case in crates/gruel-spec/cases/

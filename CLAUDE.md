@@ -722,6 +722,49 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Standard Rust formatting (rustfmt)
 - Rust edition 2024
 
+## Formatting Gruel Code (`gruel fmt`)
+
+Canonical Gruel-source formatter (ADR-0093). Library lives in
+`crates/gruel-fmt`; CLI surface is `gruel fmt`. Editor users get
+`textDocument/formatting` for free via `gruel-lsp` (Backend::formatting).
+
+```bash
+# Format a file in place (or a directory recursively, or stdin via `-`).
+gruel fmt path/to/file.gruel
+gruel fmt path/to/dir
+echo 'fn main()->i32{0}' | gruel fmt -
+
+# With no positional, the manifest is discovered upward from CWD and
+# every .gruel file under it is formatted (ADR-0092).
+gruel fmt
+
+# Diff-and-exit-non-zero mode (CI gate / pre-commit hook).
+gruel fmt --check path
+```
+
+Key style rules (full list in ADR-0093 §Decision):
+
+- 4-space indentation, K&R braces, one space around binary operators.
+- Multi-line lists end with a trailing comma; single-line lists don't.
+- **No column limit** — the formatter never wraps lines on its own; the
+  emitter follows the user's line-break choices (a newline between
+  delimiters signals "multi-line").
+- `match` arms always one per line; function bodies always multi-line.
+- `//` comments and blank-line runs are preserved verbatim, woven back
+  in via a side trivia scan (the parser drops them).
+
+Editor integration (LSP): `Backend::formatting` calls
+`gruel_fmt::format_source` against the in-memory `DocState.text` and
+emits one `TextEdit` per change hunk (using `similar`, shared with
+`--check`). Parse failures return `Ok(None)`, so format-on-save never
+clobbers a half-typed buffer.
+
+Idempotence is enforced by `crates/gruel-fmt/tests/corpus.rs` (runs
+`format_source` twice over every spec/UI test case and asserts
+equality); the differential test in the same file also re-parses the
+formatted output. The dedicated `make gruel-fmt-corpus` target runs it
+in isolation, and `make test` includes it.
+
 ## Logging Guidelines
 
 Gruel uses the `tracing` crate for structured logging, following the **"wide events"** philosophy from [loggingsucks.com](https://loggingsucks.com/). This means:

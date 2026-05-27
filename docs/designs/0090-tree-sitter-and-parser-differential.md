@@ -288,6 +288,7 @@ smoke-fuzz:
 
 - [ADR-0018: Tracing Infrastructure](0018-tracing-infrastructure.md) — pattern for adding cross-cutting tooling
 - [ADR-0019: Performance Dashboard](0019-performance-dashboard.md) — pattern for adding a CI-integrated tooling feature
+- [ADR-0093: `gruel fmt` source formatter](0093-gruel-fmt.md) — also walks the chumsky AST; the formatter and the differential here both depend on the same parser output, so syntax churn that breaks one tends to surface in the other.
 - [tree-sitter documentation](https://tree-sitter.github.io/tree-sitter/)
 - [rustc / rust-analyzer parser duality](https://rust-analyzer.github.io/book/contributing/architecture.html) — Rust's approach to two-parser maintenance
 - [Zig's std.zig.Ast shared between compiler and ZLS](https://github.com/zigtools/zls) — counterpoint approach (unified parser); we choose differently because chumsky's AST is too compiler-specific to share

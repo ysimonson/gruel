@@ -13,13 +13,13 @@ use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InlayHint,
-    InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind,
-    MessageType, OneOf, ParameterInformation, ParameterLabel, PositionEncodingKind,
-    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    DocumentFormattingParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind,
+    MessageType, OneOf, ParameterInformation, ParameterLabel, Position, PositionEncodingKind,
+    Range, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
     SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind as LspSymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WorkspaceSymbolParams,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::Mutex;
@@ -563,6 +563,7 @@ impl LanguageServer for Backend {
                     completion_item: None,
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -1062,6 +1063,39 @@ impl LanguageServer for Backend {
         }
     }
 
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> jsonrpc::Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri.clone();
+
+        // Look up the in-memory buffer. If absent (file the editor doesn't
+        // have open), there's nothing to format.
+        let original = match self.docs.get(&uri) {
+            Some(doc) => doc.text.clone(),
+            None => return Ok(None),
+        };
+
+        // Run the formatter. Parse failure returns Ok(None) so the editor
+        // leaves the buffer alone — diagnostics from the existing pipeline
+        // already cover the cause (ADR-0093 §LSP integration).
+        let formatted = match gruel_fmt::format_source(&original) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::debug!(uri = %uri, error = %e, "gruel-fmt: parse failed");
+                return Ok(None);
+            }
+        };
+
+        if formatted == original {
+            // Already canonical — return an empty edit list so the editor
+            // records a clean save.
+            return Ok(Some(Vec::new()));
+        }
+
+        Ok(Some(diff_to_text_edits(&original, &formatted)))
+    }
+
     async fn code_action(
         &self,
         params: CodeActionParams,
@@ -1088,6 +1122,66 @@ impl LanguageServer for Backend {
             Ok(Some(actions))
         }
     }
+}
+
+/// Convert (original, formatted) into a minimal list of `TextEdit`s, one per
+/// change hunk (ADR-0093 Phase 7).
+///
+/// Hunks are line-aligned: each edit replaces a contiguous range of lines
+/// with the corresponding lines from `formatted`. Editors keep cursor /
+/// fold state on the untouched lines, which a single whole-document replace
+/// would clobber. Column 0 is encoding-agnostic, so this works under either
+/// UTF-8 or UTF-16 negotiation without going through the `LineMap`.
+fn diff_to_text_edits(original: &str, formatted: &str) -> Vec<TextEdit> {
+    use similar::{DiffOp, TextDiff};
+
+    let diff = TextDiff::from_lines(original, formatted);
+    let new_lines: Vec<&str> = formatted.split_inclusive('\n').collect();
+
+    let mut edits = Vec::new();
+    // grouped_ops(0): split on Equal runs of any length, so each group is a
+    // contiguous run of changes.
+    for group in diff.grouped_ops(0) {
+        if group.is_empty() {
+            continue;
+        }
+        // Skip pure-Equal groups (no changes).
+        let all_equal = group.iter().all(|op| matches!(op, DiffOp::Equal { .. }));
+        if all_equal {
+            continue;
+        }
+
+        let mut old_start = usize::MAX;
+        let mut old_end = 0;
+        let mut new_start = usize::MAX;
+        let mut new_end = 0;
+        for op in &group {
+            let (os, oe) = (op.old_range().start, op.old_range().end);
+            let (ns, ne) = (op.new_range().start, op.new_range().end);
+            old_start = old_start.min(os);
+            old_end = old_end.max(oe);
+            new_start = new_start.min(ns);
+            new_end = new_end.max(ne);
+        }
+
+        // Collect the new lines for this hunk back into a single replacement
+        // string. `split_inclusive` keeps newlines, so concatenation
+        // reconstructs the body byte-for-byte.
+        let new_text: String = new_lines[new_start..new_end].concat();
+
+        let range = Range {
+            start: Position {
+                line: old_start as u32,
+                character: 0,
+            },
+            end: Position {
+                line: old_end as u32,
+                character: 0,
+            },
+        };
+        edits.push(TextEdit { range, new_text });
+    }
+    edits
 }
 
 fn pick_encoding(params: &InitializeParams) -> PositionEncoding {
